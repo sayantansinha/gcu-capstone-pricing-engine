@@ -10,7 +10,7 @@ import pandas as pd
 import streamlit as st
 
 from src.config.env_loader import SETTINGS
-from src.services.source_data.feature.feature_builder import label_staged_raw_files, build_features
+from src.services.source_data.feature.feature_builder_service import label_staged_raw_files, build_features
 from src.ui.common import get_run_id_from_session_state
 from src.utils.data_io_utils import latest_file_under_directory, save_processed, load_processed
 from src.utils.log_utils import get_logger, streamlit_safe

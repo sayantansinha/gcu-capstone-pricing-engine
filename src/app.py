@@ -8,8 +8,8 @@ from streamlit.runtime.scriptrunner_utils.script_run_context import get_script_r
 from src.config.env_loader import SETTINGS
 from src.ui.common import inject_css_from_file
 from src.ui.auth import require_login
-from src.ui.menu import get_nav
-from src.ui.pipeline_hub import render as render_pipeline_hub
+from src.ui.menu.menu import get_nav
+from src.ui.pipeline.pipeline_hub import render as render_pipeline_hub
 from src.utils.log_utils import handle_streamlit_exception, get_logger
 
 sys.excepthook = handle_streamlit_exception

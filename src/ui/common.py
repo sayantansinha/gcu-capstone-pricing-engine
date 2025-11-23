@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from config.env_loader import SETTINGS
 from src.utils.log_utils import get_logger
 
 LOGGER = get_logger("ui_common")
@@ -150,23 +149,27 @@ def show_last_training_badge():
 
 def store_last_model_info_in_session(
         base: dict,
+        stacked: dict,
         comb_avg: dict,
         comb_wgt: dict,
         y_true: np.ndarray,
         y_pred: np.ndarray,
         pred_source: str,
         params_map: dict,
-        trained_models: list[str]
+        trained_models: list[str],
+        model_name: str
 ):
     st.session_state["last_model"] = {
         "base": base,
+        "ensemble_stacked": stacked,
         "ensemble_avg": comb_avg,
         "ensemble_wgt": comb_wgt,
         "y_true": y_true,
         "y_pred": y_pred,
         "pred_source": pred_source,
         "params_map": params_map,
-        "trained_models": trained_models
+        "trained_models": trained_models,
+        "model_name": model_name
     }
 
 

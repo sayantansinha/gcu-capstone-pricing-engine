@@ -9,20 +9,21 @@ from typing import Final, Dict
 import pandas as pd
 import streamlit as st
 
-from src.services.analytics.modeling import (
-    train_models_parallel,
+from src.services.analytics.modeling_service import (
+    train_base_models,
     combine_average,
-    combine_weighted_inverse_rmse, AVAILABLE_MODELS,
+    combine_weighted_inverse_rmse, AVAILABLE_MODELS, build_stacked_ensemble,
 )
 from src.ui.common import show_last_training_badge, store_last_model_info_in_session
-from src.utils.data_io_utils import save_model_artifacts
+from src.ui.common import store_last_run_model_dir_in_session
 from src.utils.log_utils import streamlit_safe, get_logger
-from ui.common import store_last_run_model_dir_in_session
+from src.utils.model_io_utils import save_model_artifacts, register_model_in_registry, load_model_registry
 
 LOGGER = get_logger("ui_analytical_tools")
 PRED_SRC_DISP_NAMES: Final[Dict[str, str]] = {
+    "stacked_ensemble": "Stacked Ensemble",
     "weighted_ensemble": "Weighted Ensemble",
-    "average_ensemble": "Simple Average Ensemble",
+    "average_ensemble": "Simple Average Ensemble"
 }
 METRIC_NAMES: Final[Dict[str, str]] = {
     "RMSE": "Root Mean Squared Error",
@@ -81,19 +82,23 @@ def _multimodel_param_ui(selected_models: list[str]) -> dict[str, dict]:
     return blocks
 
 
-def _choose_display_pred(base_out, wgt, avg):
-    # prefer weighted ensemble if available
-    if isinstance(wgt, dict) and wgt.get("pred") is not None:
-        return wgt["pred"], "weighted_ensemble"
+def _choose_display_pred(base_out, stacked, wgt, avg):
+    # First Priority: Show Stacked ensemble
+    if isinstance(stacked, dict) and stacked.get("pred") is not None:
+        pred_output = stacked["pred"], "stacked_ensemble"
+    # Second Priority: Show weighted ensemble
+    elif isinstance(wgt, dict) and wgt.get("pred") is not None:
+        pred_output = wgt["pred"], "weighted_ensemble"
+    # Third Priority: Show Simple Average ensemble
+    elif isinstance(avg, dict) and avg.get("pred") is not None:
+        pred_output = avg["pred"], "average_ensemble"
+    # Fallback: Use the single best model based on RMSE
+    else:
+        metrics = base_out["per_model_metrics"]
+        best = min(metrics, key=lambda r: r["RMSE"])["model"]
+        pred_output = base_out["valid_preds"][best], f"best_model:{best}"
 
-    # else fall back to simple average
-    if isinstance(avg, dict) and avg.get("pred") is not None:
-        return avg["pred"], "average_ensemble"
-
-    # else pick the single best model by RMSE
-    metrics = base_out["per_model_metrics"]  # list of dicts with keys: model, RMSE, etc.
-    best = min(metrics, key=lambda r: r["RMSE"])["model"]
-    return base_out["valid_preds"][best], f"best_model:{best}"
+    return pred_output
 
 
 def _format_val(v):
@@ -244,10 +249,20 @@ def _show_last_model_stats():
         st.divider()
         st.markdown("### Last Model Stats")
 
-        col1, col2 = st.columns(2)
+        # --- Ensembles: Stacked / Weighted / Average ---
+        col1, col2, col3 = st.columns(3)
 
-        # --- Ensemble: Weighted ---
+        # Stacked Ensemble
         with col1:
+            st.markdown("**Ensemble: Stacked (meta-model)**")
+            stacked_metrics = (res.get("ensemble_stacked") or {}).get("metrics")
+            if stacked_metrics:
+                st.dataframe(_standardize_metrics_dict(stacked_metrics), use_container_width=True)
+            else:
+                st.info("No stacked ensemble metrics found.")
+
+        # Weighted Ensemble
+        with col2:
             st.markdown("**Ensemble: Weighted (1/RMSE)**")
             wgt_metrics = (res.get("ensemble_wgt") or {}).get("metrics")
             if wgt_metrics:
@@ -255,8 +270,8 @@ def _show_last_model_stats():
             else:
                 st.info("No weighted ensemble metrics found.")
 
-        # --- Ensemble: Average ---
-        with col2:
+        # Simple Average Ensemble
+        with col3:
             st.markdown("**Ensemble: Simple Average**")
             avg_metrics = (res.get("ensemble_avg") or {}).get("metrics")
             if avg_metrics:
@@ -284,12 +299,88 @@ def _show_last_model_stats():
             st.caption(f"**Artifacts saved under**: `{run_dir}`")
 
 
+def _render_model_registry_panel(run_id: str) -> None:
+    """
+    Show registry information for the currently active model (if any),
+    and allow registration when not yet registered.
+    """
+    last_model = st.session_state.get("last_model") or {}
+    if not last_model:
+        # Nothing trained/activated yet → no registry UI
+        return
+
+    # This is the name we stored in store_last_model_info_in_session
+    model_name = last_model.get("model_name")
+    if not model_name:
+        # Fallback, just in case
+        model_name = f"ppe_model_{run_id}"
+
+    # Load current registry index
+    try:
+        registry_entries = load_model_registry()
+    except Exception as exc:
+        LOGGER.warning("Could not load model registry: %s", exc)
+        st.info("Model registry not available at the moment.")
+        return
+
+    # Check if there is already an entry for (run_id, model_name)
+    existing_entry = next(
+        (
+            entry
+            for entry in registry_entries
+            if entry.get("run_id") == run_id and entry.get("model_name") == model_name
+        ),
+        None,
+    )
+
+    st.divider()
+    with st.container(border=True):
+        st.markdown("### Model Registry")
+
+        st.write(f"**Model:** `{model_name}`")
+        st.write(f"**Pipeline run:** `{run_id}`")
+
+        if existing_entry:
+            status = existing_entry.get("status", "unknown")
+            created_at = existing_entry.get("created_at")
+            created_by = existing_entry.get("created_by")
+
+            st.success(
+                f"This model is already registered with status **{status}**."
+            )
+
+            meta_bits = []
+            if created_at:
+                meta_bits.append(f"created at `{created_at}`")
+            if created_by:
+                meta_bits.append(f"by `{created_by}`")
+            if meta_bits:
+                st.caption(", ".join(meta_bits))
+
+            # You could later add a "Promote to deployed" or "Update status" here,
+            # but for now we just show that it is already registered.
+        else:
+            st.info("This model is not yet registered in the global registry.")
+
+            if st.button("Register this model", key="btn_register_model"):
+                username = st.session_state.get("username", "unknown")
+                register_model_in_registry(
+                    run_id=run_id,
+                    model_name=model_name,
+                    status="candidate",
+                    created_by=username,
+                )
+                st.success(
+                    f"Model `{model_name}` registered as **candidate** for this pipeline run."
+                )
+
+
 # ----------------------------------------------------------------------
 # Page render (MENU-TRIGGERED ENTRY POINT) — PARALLEL ONLY
 # ----------------------------------------------------------------------
 @streamlit_safe
 def render():
-    st.header("Analytical Tools - Model")
+    st.header("Modeling")
     show_last_training_badge()
 
     run_id = st.session_state.run_id
@@ -305,6 +396,25 @@ def render():
     if not num_cols:
         st.error("No numeric columns found in the selected feature master.")
         return
+
+    # Model Name
+    default_model_name = f"ppe_model_{run_id}"
+    with st.container(border=True):
+        st.markdown("#### Model Name")
+
+        model_name_input = st.text_input(
+            "Model name (optional)",
+            value="",
+            placeholder=default_model_name,
+            help=(
+                "If left blank, the model will be saved as "
+                f"`{default_model_name}`."
+            ),
+            key="model_name"
+        )
+
+    # Final model name to be used for the rest of the pipeline
+    model_name = model_name_input or default_model_name
 
     # Target + features
     with st.container(border=True):
@@ -341,10 +451,10 @@ def render():
 
     params_map = _multimodel_param_ui(selected_models)
 
-    # Single unified action: Train & Evaluate (parallel only)
-    if st.button("Train & Evaluate", type="primary"):
+    # Train model & Save artifacts
+    if st.button("Train", type="primary"):
         with st.spinner(f"Training on {label}..."):
-            base_train_out = train_models_parallel(
+            base_train_out = train_base_models(
                 df[features + [target]],
                 target,
                 selected_models,
@@ -355,45 +465,56 @@ def render():
         st.dataframe(pd.DataFrame(base_train_out["per_model_metrics"]).set_index("model"))
 
         # Ensembles (computed automatically behind the scenes)
+        stacked = build_stacked_ensemble(base_train_out)
         avg = combine_average(base_train_out)
         wgt = combine_weighted_inverse_rmse(base_train_out)
 
         # Result predictions (prefer combined weighted or fallback to average)
         y_true = base_train_out["y_valid"]
-        y_pred, pred_src = _choose_display_pred(base_train_out, wgt, avg)
+        y_pred, pred_src = _choose_display_pred(base_train_out, stacked, wgt, avg)
 
         st.subheader("Ensemble (automatic)")
-        st.markdown("**Simple Average**")
+        st.markdown("**Stacked Ensemble (meta-model on base predictions)**")
+        st.json(stacked["metrics"])
+
+        st.markdown("**Simple Average (for comparison)**")
         st.json(avg["metrics"])
-        st.markdown("**Weighted Average (by inverse RMSE)**")
+
+        st.markdown("**Weighted Average (by inverse RMSE, for comparison)**")
         st.json(wgt["metrics"])
 
         # Persist context
         artifact_location = save_model_artifacts(
             run_id=run_id,
             base_out=base_train_out,
+            stacked=stacked,
             comb_avg=avg,
             comb_wgt_inv_rmse=wgt,
             params_map=params_map,
             y_true=y_true,
             y_pred=y_pred,
             pred_src=pred_src,
+            model_name=model_name
         )
         st.session_state["model_trained"] = True
 
         store_last_model_info_in_session(
             base_train_out,
+            stacked,
             avg,
             wgt,
             y_true,
             y_pred,
             pred_src,
             params_map,
-            selected_models
+            selected_models,
+            model_name
         )
 
         store_last_run_model_dir_in_session(artifact_location)
 
-        st.success("Training and evaluation completed.")
+        st.success(f"Model {model_name} trained and saved to {artifact_location}")
 
     _show_last_model_stats()
+
+    _render_model_registry_panel(run_id)

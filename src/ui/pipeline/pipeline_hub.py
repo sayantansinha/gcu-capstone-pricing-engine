@@ -10,16 +10,16 @@ from streamlit.delta_generator import DeltaGenerator
 from src.config.env_loader import SETTINGS
 from src.ui.common import store_last_model_info_in_session, extract_last_trained_models, \
     store_last_run_model_dir_in_session
-from src.ui.pipeline_flow import render_pipeline_flow
-from src.ui.pipeline_steps import source_data_stager, features
-from src.ui.pipeline_steps.analytical_tools import render as render_models
-from src.ui.pipeline_steps.cleaning import render_cleaning_section
-from src.ui.pipeline_steps.display_data import render_display_section
-from src.ui.pipeline_steps.exploration import render_exploration_section
-from src.ui.pipeline_steps.reporting import render as render_reports
-from src.ui.pipeline_steps.visual_tools import render as render_visuals
-from src.utils.data_io_utils import latest_file_under_directory, load_processed, model_run_exists, load_model_csv, \
-    load_model_json
+from src.ui.pipeline.pipeline_flow import render_pipeline_flow
+from src.ui.pipeline.steps import features, source_data_stager
+from src.ui.pipeline.steps.modeling import render as render_models
+from src.ui.pipeline.steps.cleaning import render_cleaning_section
+from src.ui.pipeline.steps.display_data import render_display_section
+from src.ui.pipeline.steps.exploration import render_exploration_section
+from src.ui.pipeline.steps.reporting import render as render_reports
+from src.ui.pipeline.steps.visual_tools import render as render_visuals
+from src.utils.data_io_utils import latest_file_under_directory, load_processed
+from src.utils.model_io_utils import model_run_exists, load_model_csv, load_model_json
 from src.utils.log_utils import get_logger
 
 LOGGER = get_logger("pipeline_hub")
@@ -132,7 +132,7 @@ def _activate_model(run_id: str) -> bool:
     Load model artifacts (predictions, ensemble summaries, per-model metrics, params)
     for a given run_id from either LOCAL or S3, and stash them into session_state.
 
-    All IO goes through data_io_utils, so this function is backend-agnostic.
+    All IO goes through data_io_utils/model_io_utils, so this function is backend-agnostic.
     """
 
     # ---------- Predictions (required) ----------
@@ -153,6 +153,14 @@ def _activate_model(run_id: str) -> bool:
         ensemble_avg = load_model_json(run_id, "ensemble_avg.json") or {}
         ensemble_wgt = load_model_json(run_id, "ensemble_weighted.json") or {}
 
+        # ---------- Stacked ensemble meta ----------
+        hybrid_meta = load_model_json(run_id, "ensemble_stacked.json") or {}
+        stacked_metrics = hybrid_meta.get("metrics") or {}
+        model_name = hybrid_meta.get("model_name") or f"ppe_model_{run_id}"
+
+        # We don't have stacked predictions when reloading; only metrics.
+        stacked = {"metrics": stacked_metrics}
+
         # ---------- Per-model metrics (CSV, optional) ----------
         pm_metrics_df = load_model_csv(run_id, "per_model_metrics.csv")
         if pm_metrics_df is not None:
@@ -165,9 +173,12 @@ def _activate_model(run_id: str) -> bool:
         # ---------- Hyperparameters map (JSON, optional) ----------
         params_map = load_model_json(run_id, "params_map.json") or {}
 
-        # ---------- Store in session ----------
+        # ---------- Store in session (keep signature consistent with modeling.py) ----------
+        base_for_session = {"per_model_metrics": per_model_metrics}
+
         store_last_model_info_in_session(
-            {"per_model_metrics": per_model_metrics},
+            base_for_session,
+            stacked,
             ensemble_avg,
             ensemble_wgt,
             y_true,
@@ -175,12 +186,14 @@ def _activate_model(run_id: str) -> bool:
             pred_src,
             params_map,
             trained_models,
+            model_name
         )
 
         store_last_run_model_dir_in_session(run_id)
 
         st.session_state["model_trained"] = True
         return True
+
     except Exception as e:
         st.error("Could not activate model run, check logs for details")
         LOGGER.exception("Error in _activate_model", exc_info=e)
@@ -207,7 +220,7 @@ def _render_current_artifacts(
     last_trained_models = extract_last_trained_models(True) if has_model else "N/A"
     st.markdown(
         f"> **Current artifacts** — Feature Master (raw): **{fm_raw_label}** "
-        f"| Feature Master (cleaned): **{fm_clean_label}** |  Model(s): **{last_trained_models}**"
+        f"| Feature Master (cleaned): **{fm_clean_label}** | Base Model(s): **{last_trained_models}**"
     )
 
 
@@ -319,8 +332,8 @@ def render():
     _activate_feature_master(run_id, fm_raw_path, fm_clean_path)
     LOGGER.info("Feature master (clean) artifacts loaded and session states activated")
 
-    # Analytical Tools – Model
-    with st.expander("Analytical Tools – Model", expanded=False):
+    # Modeling
+    with st.expander("Modeling", expanded=False):
         if fm_clean_path:
             with _suppress_child_section_panels():
                 render_models()

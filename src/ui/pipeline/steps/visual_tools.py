@@ -4,7 +4,7 @@ import base64
 
 import streamlit as st
 
-from src.services.analytics.visual_tools import (
+from src.services.analytics.visual_tools_service import (
     chart_actual_vs_pred, chart_residuals, chart_residuals_qq
 )
 from src.ui.common import show_last_training_badge

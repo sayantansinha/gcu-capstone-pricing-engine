@@ -37,9 +37,9 @@ def _flow_status_from_context(ctx: Dict) -> Dict[str, str]:
         "display_data": "done" if ctx.get("data_displayed") else "not_started",
         "exploration": "done" if ctx.get("eda_performed") else "not_started",
         "preprocessing": "done" if ctx.get("preprocessing_performed") else "not_started",
-        "analytical_tools": "done" if ctx.get("model_trained") else "not_started",
+        "modeling": "done" if ctx.get("model_trained") else "not_started",
         "visual_tools": "done" if ctx.get("model_trained") else "not_started",
-        "report_generator": "done" if ctx.get("report_generated") else "not_started"
+        "reporting": "done" if ctx.get("report_generated") else "not_started"
     }
 
 
@@ -52,11 +52,11 @@ def _flow_graphviz_dot(status_map: Dict[str, str]) -> str:
         "data_staging": "Data Staging",
         "feature_master": "Feature Master",
         "display_data": "Display Data",
-        "exploration": "Exploration (EDA)",
-        "preprocessing": "Preprocessing (and Cleaning)",
-        "analytical_tools": "Analytical Tools – Model",
+        "exploration": "EDA",
+        "preprocessing": "Preprocessing",
+        "modeling": "Modeling",
         "visual_tools": "Visual Tools",
-        "report_generator": "Report Generator"
+        "reporting": "Reporting"
     }
 
     steps = list(label_map.keys())
