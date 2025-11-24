@@ -5,13 +5,15 @@ from typing import Tuple
 
 import streamlit as st
 
-from src.config.page_constants import PAGE_KEY_HOME, PAGE_KEY_PIPELINE, PAGE_KEY_PRC_PRED, PAGE_KEY_CMPR_BNDL
+from src.config.page_constants import PAGE_KEY_HOME, PAGE_KEY_PIPELINE, PAGE_KEY_PRC_PRED, PAGE_KEY_CMPR_BNDL, \
+    PAGE_KEY_RPT
 from src.ui.common import logo_path, APP_NAME
 
 _MENU_LABEL_HOME = "Home"
 _MENU_LABEL_PIPELINE = "Pipeline"
 _MENU_LABEL_PRC_PRED = "Price Predictor"
 _MENU_LABEL_CMPR_BNDL = "Compare & Bundling"
+_MENU_LABEL_RPT = "Reports"
 
 
 def _section_header() -> None:
@@ -131,41 +133,41 @@ def get_nav() -> Tuple[str, str]:
         # -------------------------
         # Trend Analysis
         # -------------------------
-        if _main_menu_button(
-                label="Trend Analysis",
-                key="nav_main_trend_analysis",
-                active=(active_main == "Trend Analysis"),
-        ):
-            active_main = "Trend Analysis"
-            page_key = "trend_analysis"
-            st.session_state["nav_main"] = active_main
-            st.session_state["nav_page_key"] = page_key
-            st.rerun()
+        # if _main_menu_button(
+        #         label="Trend Analysis",
+        #         key="nav_main_trend_analysis",
+        #         active=(active_main == "Trend Analysis"),
+        # ):
+        #     active_main = "Trend Analysis"
+        #     page_key = "trend_analysis"
+        #     st.session_state["nav_main"] = active_main
+        #     st.session_state["nav_page_key"] = page_key
+        #     st.rerun()
 
         # -------------------------
         # What-If Simulator
         # -------------------------
-        if _main_menu_button(
-                label="What-If Simulator",
-                key="nav_main_what_if",
-                active=(active_main == "What-If Simulator"),
-        ):
-            active_main = "What-If Simulator"
-            page_key = "what_if_simulator"
-            st.session_state["nav_main"] = active_main
-            st.session_state["nav_page_key"] = page_key
-            st.rerun()
+        # if _main_menu_button(
+        #         label="What-If Simulator",
+        #         key="nav_main_what_if",
+        #         active=(active_main == "What-If Simulator"),
+        # ):
+        #     active_main = "What-If Simulator"
+        #     page_key = "what_if_simulator"
+        #     st.session_state["nav_main"] = active_main
+        #     st.session_state["nav_page_key"] = page_key
+        #     st.rerun()
 
         # -------------------------
         # Reports
         # -------------------------
         if _main_menu_button(
-                label="Reports",
+                label=_MENU_LABEL_RPT,
                 key="nav_main_reports",
-                active=(active_main == "Reports"),
+                active=(active_main == _MENU_LABEL_RPT),
         ):
-            active_main = "Reports"
-            page_key = "reports"
+            active_main = _MENU_LABEL_RPT
+            page_key = PAGE_KEY_RPT
             st.session_state["nav_main"] = active_main
             st.session_state["nav_page_key"] = page_key
             st.rerun()

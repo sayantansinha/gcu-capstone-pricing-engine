@@ -6,21 +6,23 @@ import streamlit as st
 from streamlit.runtime.scriptrunner_utils.script_run_context import get_script_run_ctx
 
 from src.config.env_loader import SETTINGS
-from src.config.page_constants import PAGE_KEY_PIPELINE, PAGE_KEY_HOME, PAGE_KEY_PRC_PRED, PAGE_KEY_CMPR_BNDL
+from src.config.page_constants import PAGE_KEY_PIPELINE, PAGE_KEY_HOME, PAGE_KEY_PRC_PRED, PAGE_KEY_CMPR_BNDL, \
+    PAGE_KEY_RPT
 from src.ui.bundling.compare_and_bundling import render_compare_and_bundling
-from src.ui.common import inject_css_from_file
+from src.ui.common import inject_css_from_file, APP_NAME
 from src.ui.auth import require_login
 from src.ui.home.home import render_home
 from src.ui.menu import get_nav
 from src.ui.pipeline.pipeline_hub import render as render_pipeline_hub
 from src.ui.price_predictor.price_predictor import render_price_predictor
+from src.ui.reports.reports import render_reports
 from src.utils.log_utils import handle_streamlit_exception, get_logger
 
 sys.excepthook = handle_streamlit_exception
 LOGGER = get_logger("app")
 
 st.set_page_config(
-    page_title="Predictive Pricing Engine",
+    page_title=APP_NAME,
     page_icon="ui/assets/logo.svg",
     layout="wide"
 )
@@ -50,7 +52,8 @@ ROUTES = {
     PAGE_KEY_HOME: render_home,
     PAGE_KEY_PIPELINE: render_pipeline_hub,
     PAGE_KEY_PRC_PRED: render_price_predictor,
-    PAGE_KEY_CMPR_BNDL: render_compare_and_bundling
+    PAGE_KEY_CMPR_BNDL: render_compare_and_bundling,
+    PAGE_KEY_RPT: render_reports
 }
 
 

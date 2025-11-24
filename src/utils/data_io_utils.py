@@ -470,3 +470,90 @@ def load_report_for_download(path_or_ref: str) -> bytes:
         p = Path(ref)
         with open(p, "rb") as f:
             return f.read()
+
+
+# -----------------------------
+# Reports listing helpers
+# -----------------------------
+def list_report_runs() -> List[str]:
+    """
+    List run_ids (base_dir) that have at least one report saved,
+    abstracting over LOCAL vs S3.
+    """
+    if _is_s3():
+        bucket = getattr(SETTINGS, "REPORTS_BUCKET", None)
+        if not bucket:
+            LOGGER.warning("REPORTS_BUCKET not configured; list_report_runs → []")
+            return []
+
+        # List all objects under the reports bucket and infer run_ids
+        keys = list_bucket_objects(bucket, prefix="")
+        run_ids: set[str] = set()
+        for key in keys:
+            # Only consider PDF report objects
+            if not key.endswith(".pdf"):
+                continue
+            # run_id is first path segment
+            parts = key.split("/", 1)
+            if parts and parts[0]:
+                run_ids.add(parts[0].strip("/"))
+        return sorted(run_ids)
+    else:
+        reports_root = Path(SETTINGS.REPORTS_DIR)
+        if not reports_root.exists():
+            LOGGER.info("Reports root directory does not exist: %s", reports_root)
+            return []
+
+        # Assume each run has its own subdirectory under REPORTS_DIR
+        run_ids: List[str] = [
+            p.name for p in reports_root.iterdir()
+            if p.is_dir()
+        ]
+        return sorted(run_ids)
+
+
+def list_reports_for_run(
+        run_id: str,
+        prefix: str | None = None,
+        suffix: str = ".pdf",
+) -> List[str]:
+    """
+    List all report references for a given run_id.
+
+    Returns:
+        LOCAL → list of filesystem paths as str
+        S3    → list of s3://bucket/key URIs
+    """
+    run_id = run_id.strip("/")
+
+    if _is_s3():
+        bucket = getattr(SETTINGS, "REPORTS_BUCKET", None)
+        if not bucket:
+            LOGGER.warning("REPORTS_BUCKET not configured; list_reports_for_run → []")
+            return []
+
+        base_prefix = run_id
+        search = f"{base_prefix}/"
+        keys = [
+            k for k in list_bucket_objects(bucket, search)
+            if k.startswith(search)
+               and k.endswith(suffix)
+               and (prefix is None or Path(k).name.startswith(prefix))
+        ]
+        keys.sort()
+        # Return full s3:// URIs so load_report_for_download can use them
+        return [formulate_s3_uri(bucket, k) for k in keys]
+    else:
+        reports_dir = Path(SETTINGS.REPORTS_DIR) / run_id
+        if not reports_dir.exists():
+            LOGGER.info("Reports dir for run_id %s does not exist: %s", run_id, reports_dir)
+            return []
+
+        files = [
+            p for p in reports_dir.iterdir()
+            if p.is_file()
+               and p.suffix == suffix
+               and (prefix is None or p.name.startswith(prefix))
+        ]
+        files.sort(key=lambda p: p.name)
+        return [str(p) for p in files]
