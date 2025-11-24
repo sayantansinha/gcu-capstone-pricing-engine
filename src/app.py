@@ -24,7 +24,9 @@ st.set_page_config(
 # dev mode: ensure css changes triggers an automatic reload
 ctx = get_script_run_ctx()
 if ctx and ctx.session_id:
-    inject_css_from_file("src/ui/styles/main_app.css")
+    inject_css_from_file("src/ui/styles/app.css")
+    inject_css_from_file("src/ui/styles/menu.css")
+    inject_css_from_file("src/ui/styles/pipeline.css")
 
 # --- session defaults ---
 for k, v in {

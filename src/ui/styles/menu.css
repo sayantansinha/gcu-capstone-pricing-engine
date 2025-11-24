@@ -1,0 +1,50 @@
+/* Use theme tokens so dark/light both work */
+section[data-testid="stSidebar"] * {
+    color: var(--text-color) !important;
+}
+
+/* Expander header text */
+section[data-testid="stSidebar"] details > summary {
+    color: var(--text-color) !important;
+}
+
+/* Expander body background follows secondary panel */
+section[data-testid="stSidebar"] .stExpanderContent {
+    background: var(--secondary-background-color) !important;
+}
+
+/* Buttons in sidebar: ensure readable text */
+section[data-testid="stSidebar"] .stButton > button {
+
+}
+
+section[data-testid="stSidebar"] .stButton > button {
+    width: 100% !important;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start; /* left align */
+    text-align: left;
+    line-height: 1.25;
+    padding: .70rem .85rem;
+    border-radius: .9rem;
+    font-size: 1.0rem;
+    font-weight: 700;
+    box-shadow: none;
+    transition: background .2s, border .2s, box-shadow .2s;
+    background: rgba(67, 84, 230, 0.18);
+    border: 1px solid rgba(67, 84, 230, 0.18);
+}
+
+section[data-testid="stSidebar"] .stButton > button:hover {
+    background: rgba(80, 76, 215, 0.47);
+    border-color: rgba(80, 76, 215, 0.47);
+    filter: brightness(0.92);
+}
+
+.menu-main-row {
+    margin-bottom: 0.25rem;
+}
+
+.menu-main-row.active button {
+    font-weight: 600;
+}
