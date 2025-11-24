@@ -1,0 +1,128 @@
+/* Card container */
+.ppe-card {
+    padding: 1.25rem 1.5rem;
+    border-radius: 0.9rem;
+    border: 1px solid rgb(200, 200, 200);
+    background-color: rgba(236, 229, 229, 0.18);
+    margin-bottom: 1.0rem;
+}
+
+.ppe-card h3 {
+    margin-top: 0;
+    margin-bottom: 0.4rem;
+    font-size: 1.1rem;
+}
+
+.ppe-card p {
+    margin-top: 0.1rem;
+    margin-bottom: 0.6rem;
+}
+
+.ppe-caption {
+    font-size: 0.78rem;
+    color: rgba(160, 160, 160, 0.95);
+    margin-top: 0.35rem;
+}
+
+/* Metric row for model insights */
+.ppe-metric-row {
+    display: flex;
+    flex-direction: row;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+    margin-top: 0.5rem;
+    margin-bottom: 0.3rem;
+}
+
+.ppe-metric {
+    min-width: 6rem;
+}
+
+.ppe-metric-label {
+    font-size: 0.78rem;
+    color: rgba(170, 170, 170, 0.95);
+}
+
+.ppe-metric-value {
+    font-size: 1.05rem;
+    font-weight: 600;
+}
+
+/* Chips (status pills) */
+.ppe-chip-row {
+    margin-top: 0.3rem;
+    margin-bottom: 0.3rem;
+}
+
+.ppe-chip {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    border: 1px solid rgba(150, 150, 150, 0.6);
+    margin-right: 0.3rem;
+    margin-bottom: 0.15rem;
+}
+
+.ppe-chip-ok {
+    background-color: rgba(46, 204, 113, 0.1);
+    border-color: rgba(46, 204, 113, 0.7);
+}
+
+.ppe-chip-warn {
+    background-color: rgba(241, 196, 15, 0.08);
+    border-color: rgba(241, 196, 15, 0.7);
+}
+
+.ppe-chip-bad {
+    background-color: rgba(231, 76, 60, 0.1);
+    border-color: rgba(231, 76, 60, 0.8);
+}
+
+/* Recent Activity list */
+.ppe-activity-list {
+    list-style-type: none;
+    padding-left: 0;
+    margin-top: 0.2rem;
+    margin-bottom: 0.3rem;
+}
+
+.ppe-activity-list li {
+    margin-bottom: 0.35rem;
+    font-size: 0.88rem;
+}
+
+.ppe-activity-label {
+    font-weight: 500;
+}
+
+.ppe-activity-detail {
+    color: rgba(200, 200, 200, 0.95);
+}
+
+.ppe-activity-ts {
+    font-size: 0.75rem;
+    color: rgba(150, 150, 150, 0.95);
+}
+
+/* Make all cards inside the same Streamlit column equal height */
+div[data-testid="column"] > div > .ppe-card {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Ensure inner content stretches properly */
+.ppe-card {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between; /* pushes footer text down if needed */
+}
+
+/* Optional: consistent spacing inside cards */
+.ppe-card p,
+.ppe-card .ppe-caption,
+.ppe-card ul {
+    flex-shrink: 0;
+}

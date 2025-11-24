@@ -1,0 +1,71 @@
+.ppe-run-header {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    margin-bottom: 0.4rem;
+}
+
+.ppe-run-label {
+    font-size: 0.85rem;
+    color: #888;
+}
+
+.ppe-run-name {
+    font-weight: 600;
+    font-size: 0.95rem;
+}
+
+.ppe-status-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.15rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border: 1px solid #ccc;
+    color: #444;
+    background: #f6f6f6;
+    margin-top: 0.2rem;
+}
+
+.ppe-status-chip--modeled {
+    border-color: #4caf50;
+    color: #1b5e20;
+    background: #e8f5e9;
+}
+
+.ppe-status-chip--validated {
+    border-color: #1976d2;
+    color: #0d47a1;
+    background: #e3f2fd;
+}
+
+.ppe-run-updated {
+    font-size: 0.8rem;
+    color: #777;
+    text-align: right;
+    margin-top: 0.2rem;
+}
+
+.ppe-run-updated-label {
+    font-weight: 500;
+    margin-right: 0.25rem;
+}
+
+.ppe-price-card {
+    padding: 0.7rem 0.9rem;
+    border-radius: 0.75rem;
+    border: 1px solid #ddd;
+    background: #fafafa;
+}
+
+.ppe-price-label {
+    font-size: 0.8rem;
+    color: #666;
+    margin-bottom: 0.1rem;
+}
+
+.ppe-price-value {
+    font-size: 1.6rem;
+    font-weight: 700;
+}

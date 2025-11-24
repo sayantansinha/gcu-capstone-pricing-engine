@@ -6,10 +6,14 @@ import streamlit as st
 from streamlit.runtime.scriptrunner_utils.script_run_context import get_script_run_ctx
 
 from src.config.env_loader import SETTINGS
+from src.config.page_constants import PAGE_KEY_PIPELINE, PAGE_KEY_HOME, PAGE_KEY_PRC_PRED, PAGE_KEY_CMPR_BNDL
+from src.ui.bundling.compare_and_bundling import render_compare_and_bundling
 from src.ui.common import inject_css_from_file
 from src.ui.auth import require_login
+from src.ui.home.home import render_home
 from src.ui.menu import get_nav
 from src.ui.pipeline.pipeline_hub import render as render_pipeline_hub
+from src.ui.price_predictor.price_predictor import render_price_predictor
 from src.utils.log_utils import handle_streamlit_exception, get_logger
 
 sys.excepthook = handle_streamlit_exception
@@ -27,6 +31,8 @@ if ctx and ctx.session_id:
     inject_css_from_file("src/ui/styles/app.css")
     inject_css_from_file("src/ui/styles/menu.css")
     inject_css_from_file("src/ui/styles/pipeline.css")
+    inject_css_from_file("src/ui/styles/price_predictor.css")
+    inject_css_from_file("src/ui/styles/home.css")
 
 # --- session defaults ---
 for k, v in {
@@ -39,30 +45,17 @@ for k, v in {
 }.items():
     st.session_state.setdefault(k, v)
 
-
-# --- inline blank-slate renderer ---
-def _render_home():
-    st.title("Welcome")
-    st.subheader("Start a pipeline")
-    st.write(
-        "Use **New Pipeline** at the bottom-right of the sidebar to create a fresh run, "
-        "or click an existing run under **Pipeline Runs** to continue."
-    )
-    st.caption(
-        "After creating/selecting a run, the main area will guide you through staging, "
-        "feature building, EDA, cleaning, and modeling."
-    )
-
-
 # --- routes ---
 ROUTES = {
-    "home": _render_home,
-    "pipeline_hub": render_pipeline_hub,
+    PAGE_KEY_HOME: render_home,
+    PAGE_KEY_PIPELINE: render_pipeline_hub,
+    PAGE_KEY_PRC_PRED: render_price_predictor,
+    PAGE_KEY_CMPR_BNDL: render_compare_and_bundling
 }
 
 
 def _dispatch(page_key: str):
-    ROUTES.get(page_key, _render_home)()
+    ROUTES.get(page_key, render_home)()
 
 
 def main():

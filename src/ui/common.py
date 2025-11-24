@@ -11,7 +11,7 @@ from src.utils.log_utils import get_logger
 LOGGER = get_logger("ui_common")
 
 # App identity (logo + name)
-APP_NAME = "Predictive Pricing Engine"
+APP_NAME = "Pricing & Licensing Insights"
 _LOGO_PATHS = [
     "src/ui/assets/logo.svg",
     "ui/assets/logo.svg",

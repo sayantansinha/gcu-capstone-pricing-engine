@@ -11,6 +11,13 @@
     font-weight: 700;
 }
 
+/* Make all expander headers bigger */
+div[data-testid="stExpander"] > details > summary p {
+    font-size: 1.5rem;
+    font-weight: 600;
+    padding: 0.35rem 0.25rem;
+}
+
 /* Use theme tokens so dark/light both work */
 section[data-testid="stSidebar"] * {
     color: var(--text-color) !important;
@@ -64,7 +71,7 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 
 /* Top toolbar container: tighten vertical gap */
 .pipeline-toolbar {
-    margin-bottom: 0.25rem;   /* was 0.4 or more before */
+    margin-bottom: 0.25rem; /* was 0.4 or more before */
 }
 
 /* Make contents in each toolbar column vertically centered */
@@ -84,10 +91,10 @@ section[data-testid="stSidebar"] .stButton > button:hover {
     border-radius: 999px;
     font-size: 1rem;
     font-weight: 600;
-    background-color: #6787f1;       /* light indigo */
-    color: #3730a3;                  /* dark indigo text */
+    background-color: #6787f1; /* light indigo */
+    color: #3730a3; /* dark indigo text */
     border: 1px solid #c7d2fe;
-    transform: translateY(-1px);     /* small tweak to align with dropdown */
+    transform: translateY(-1px); /* small tweak to align with dropdown */
 }
 
 .toolbar-new-pipeline .stButton > button:hover {
@@ -105,7 +112,7 @@ section[data-testid="stSidebar"] .stButton > button:hover {
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
-    margin-top: 0.25rem;     /* was ~0.6rem */
+    margin-top: 0.25rem; /* was ~0.6rem */
     margin-bottom: 0.6rem;
     font-size: 1rem;
 }

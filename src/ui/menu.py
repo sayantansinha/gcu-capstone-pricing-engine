@@ -5,7 +5,13 @@ from typing import Tuple
 
 import streamlit as st
 
+from src.config.page_constants import PAGE_KEY_HOME, PAGE_KEY_PIPELINE, PAGE_KEY_PRC_PRED, PAGE_KEY_CMPR_BNDL
 from src.ui.common import logo_path, APP_NAME
+
+_MENU_LABEL_HOME = "Home"
+_MENU_LABEL_PIPELINE = "Pipeline"
+_MENU_LABEL_PRC_PRED = "Price Predictor"
+_MENU_LABEL_CMPR_BNDL = "Compare & Bundling"
 
 
 def _section_header() -> None:
@@ -53,7 +59,7 @@ def get_nav() -> Tuple[str, str]:
     Examples of page_key:
         - "home"
         - "pipeline_hub"
-        - "price_prediction"
+        - "price_predictor"
         - "compare_bundling"
         - "trend_analysis"
         - "what_if_simulator"
@@ -63,19 +69,19 @@ def get_nav() -> Tuple[str, str]:
         _section_header()
 
         # Restore current navigation state from session
-        active_main = st.session_state.get("nav_main", "Home")
-        page_key = st.session_state.get("nav_page_key", "home")
+        active_main = st.session_state.get("nav_main", _MENU_LABEL_HOME)
+        page_key = st.session_state.get("nav_page_key", PAGE_KEY_HOME)
 
         # -------------------------
         # Home
         # -------------------------
         if _main_menu_button(
-                label="Home",
+                label=_MENU_LABEL_HOME,
                 key="nav_main_home",
-                active=(active_main == "Home"),
+                active=(active_main == _MENU_LABEL_HOME),
         ):
-            active_main = "Home"
-            page_key = "home"
+            active_main = _MENU_LABEL_HOME
+            page_key = PAGE_KEY_HOME
             st.session_state["nav_main"] = active_main
             st.session_state["nav_page_key"] = page_key
             st.rerun()
@@ -84,26 +90,26 @@ def get_nav() -> Tuple[str, str]:
         # Pipeline
         # -------------------------
         if _main_menu_button(
-                label="Pipeline",
+                label=_MENU_LABEL_PIPELINE,
                 key="nav_main_pipeline",
-                active=(active_main == "Pipeline"),
+                active=(active_main == _MENU_LABEL_PIPELINE),
         ):
-            active_main = "Pipeline"
-            page_key = "pipeline_hub"
+            active_main = _MENU_LABEL_PIPELINE
+            page_key = PAGE_KEY_PIPELINE
             st.session_state["nav_main"] = active_main
             st.session_state["nav_page_key"] = page_key
             st.rerun()
 
         # -------------------------
-        # Price Prediction
+        # Price Predictor
         # -------------------------
         if _main_menu_button(
-                label="Price Prediction",
-                key="nav_main_price_prediction",
-                active=(active_main == "Price Prediction"),
+                label=_MENU_LABEL_PRC_PRED,
+                key="nav_main_price_predictor",
+                active=(active_main == _MENU_LABEL_PRC_PRED),
         ):
-            active_main = "Price Prediction"
-            page_key = "price_prediction"
+            active_main = _MENU_LABEL_PRC_PRED
+            page_key = PAGE_KEY_PRC_PRED
             st.session_state["nav_main"] = active_main
             st.session_state["nav_page_key"] = page_key
             st.rerun()
@@ -112,12 +118,12 @@ def get_nav() -> Tuple[str, str]:
         # Compare & Bundling
         # -------------------------
         if _main_menu_button(
-                label="Compare & Bundling",
+                label=_MENU_LABEL_CMPR_BNDL,
                 key="nav_main_compare_bundling",
-                active=(active_main == "Compare & Bundling"),
+                active=(active_main == _MENU_LABEL_CMPR_BNDL),
         ):
-            active_main = "Compare & Bundling"
-            page_key = "compare_bundling"
+            active_main = _MENU_LABEL_CMPR_BNDL
+            page_key = PAGE_KEY_CMPR_BNDL
             st.session_state["nav_main"] = active_main
             st.session_state["nav_page_key"] = page_key
             st.rerun()

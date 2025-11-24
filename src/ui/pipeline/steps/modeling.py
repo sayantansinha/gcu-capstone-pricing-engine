@@ -9,7 +9,7 @@ from typing import Final, Dict
 import pandas as pd
 import streamlit as st
 
-from src.services.analytics.modeling_service import (
+from src.services.pipeliine.analytics.modeling_service import (
     train_base_models,
     combine_average,
     combine_weighted_inverse_rmse, AVAILABLE_MODELS, build_stacked_ensemble,

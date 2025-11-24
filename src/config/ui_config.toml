@@ -1,0 +1,35 @@
+[territories]
+USA = "United States of America"
+GBR = "United Kingdom"
+CAN = "Canada"
+AUS = "Australia"
+DEU = "Germany"
+IND = "India"
+FRA = "France"
+JPN = "Japan"
+ESP = "Spain"
+TUR = "Turkey"
+RUS = "Russia"
+DNK = "Denmark"
+SRB = "Serbia"
+
+[medias]
+SVOD = "Subscription Video on-demand (SVOD)"
+TVOD = "Transaction Video on-demand (TVOD)"
+AVOD = "Advertising-based Video on-demand (AVOD)"
+PAYTV = "Pay TV"
+BC = "Basic Cable"
+
+[platforms]
+NETFLIX = "Netflix"
+PRIME_VIDEO = "Prime Video"
+DISNEY_PLUS = "Disney+"
+HULU = "Hulu"
+MAX = "HBO Max"
+PARAMOUNT_PLUS = "Paramount+"
+PEACOCK_PREMIUM = "Peacock Premium"
+APPLE_TV_PLUS = "Apple TV+"
+
+[license_types]
+EXCLUSIVE = "Exclusive"
+NON_EXCLUSIVE = "Non-Exclusive"
