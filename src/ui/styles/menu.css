@@ -48,3 +48,14 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 .menu-main-row.active button {
     font-weight: 600;
 }
+
+.sidebar-user {
+    margin-top: .55rem;
+}
+
+button[kind="secondary"]#logout_btn {
+    border: none !important;
+    padding: 0.15rem 0.3rem !important;
+    background: darkred !important;
+    font-size: 0.9rem !important;
+}

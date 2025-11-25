@@ -8,7 +8,7 @@ import joblib
 import pandas as pd
 
 from src.config.env_loader import SETTINGS
-from src.utils.data_io_utils import _ensure_buckets, _is_s3
+from src.utils.data_io_utils import _ensure_buckets, is_s3
 from src.utils.log_utils import get_logger
 from src.utils.s3_utils import (
     write_bucket_object,
@@ -211,7 +211,7 @@ def _get_model_store(run_id: str) -> _BaseModelStore:
     """
     Factory that returns the appropriate model store implementation for the current backend.
     """
-    if _is_s3():
+    if is_s3():
         return _S3ModelStore(run_id)
     return _LocalModelStore(run_id)
 
@@ -299,7 +299,7 @@ def _save_model_artifacts_to_store(
 
     LOGGER.info(
         "Saved model artifacts (%s) → %s",
-        "S3" if _is_s3() else "LOCAL",
+        "S3" if is_s3() else "LOCAL",
         store.uri(),
     )
     return store.uri()
@@ -422,7 +422,7 @@ def load_model_registry() -> list[dict]:
     LOCAL: <MODELS_DIR>/model_registry.json
     S3:    s3://<MODELS_BUCKET>/model_registry.json
     """
-    if _is_s3():
+    if is_s3():
         bucket, key = _registry_bucket_key()
         if not bucket:
             LOGGER.warning("MODELS_BUCKET not configured; load_model_registry → []")
@@ -450,7 +450,7 @@ def save_model_registry(entries: list[dict]) -> None:
     """
     Persist the global model registry index.
     """
-    if _is_s3():
+    if is_s3():
         bucket, key = _registry_bucket_key()
         if not bucket:
             LOGGER.warning("MODELS_BUCKET not configured; save_model_registry → no-op")

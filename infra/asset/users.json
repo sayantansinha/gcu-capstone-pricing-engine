@@ -1,0 +1,34 @@
+[
+  {
+    "username": "admin",
+    "password": "admin",
+    "name": "Admin",
+    "roles": [
+      1
+    ]
+  },
+  {
+    "username": "analyst",
+    "password": "analyst",
+    "name": "Analyst",
+    "roles": [
+      2
+    ]
+  },
+  {
+    "username": "planner",
+    "password": "planner",
+    "name": "Planner",
+    "roles": [
+      3
+    ]
+  },
+  {
+    "username": "manager",
+    "password": "manager",
+    "name": "Manager",
+    "roles": [
+      4
+    ]
+  }
+]

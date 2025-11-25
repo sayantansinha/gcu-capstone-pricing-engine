@@ -1,0 +1,45 @@
+[
+  {
+    "id": 1,
+    "name": "Admin",
+    "description": "Full system access including security administration.",
+    "allowed_page_keys": [
+      "home",
+      "pipeline_hub",
+      "price_predictor",
+      "compare_bundling",
+      "reports",
+      "admin"
+    ]
+  },
+  {
+    "id": 2,
+    "name": "Analyst",
+    "description": "Can define and manage data pipelines.",
+    "allowed_page_keys": [
+      "home",
+      "pipeline_hub"
+    ]
+  },
+  {
+    "id": 3,
+    "name": "Sales Planner",
+    "description": "Can use pricing tools for planning.",
+    "allowed_page_keys": [
+      "home",
+      "price_predictor",
+      "compare_bundling"
+    ]
+  },
+  {
+    "id": 4,
+    "name": "Sales Manager",
+    "description": "Sales planning plus reporting.",
+    "allowed_page_keys": [
+      "home",
+      "price_predictor",
+      "compare_bundling",
+      "reports"
+    ]
+  }
+]

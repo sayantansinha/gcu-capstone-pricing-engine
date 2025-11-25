@@ -1,72 +1,40 @@
-import base64
-import os
-import functools
+from __future__ import annotations
 
-import boto3
+import base64
+
 import streamlit as st
 
-from src.config.env_loader import SETTINGS
 from src.ui.common import logo_path, APP_NAME
+from src.services.security.auth_service import (
+    authenticate as authenticate_user,
+    get_allowed_page_keys_for_roles,
+)
 
-APP_USERNAME = os.getenv("PPE_APP_USERNAME", "admin")  # can parameterize later
 
-
-@functools.lru_cache(maxsize=1)
-def _fetch_password_from_ssm() -> str:
+def require_login() -> None:
     """
-    Fetch the admin password from SSM Parameter Store.
+    UI-only login gate.
 
-    Looks for SSM param as a SecureString or String.
-    Assumes the code is running on EC2 with an IAM role that
-    can call ssm:GetParameter on that name.
+    - Delegates authentication and RBAC to services/security/*.
+    - Stores username, role_ids, and allowed_page_keys in session_state.
     """
-    ssm = boto3.client("ssm", region_name=SETTINGS.AWS_REGION)
-    response = ssm.get_parameter(
-        Name="ppe_admin_password",
-        WithDecryption=True
-    )
-    return response["Parameter"]["Value"]
-
-
-def get_admin_password() -> str:
-    """
-    Resolve the admin password from SSM Parameter Store via IAM role.
-    """
-    return _fetch_password_from_ssm()
-
-
-def require_login():
-    """
-    Gate the PPE app behind a simple username/password login.
-
-    - Stores 'authenticated' in st.session_state.
-    - If not authenticated, renders a login form and stops the app.
-    """
-    if "authenticated" not in st.session_state:
-        st.session_state["authenticated"] = False
-
-    if st.session_state["authenticated"]:
+    if st.session_state.get("authenticated"):
         return
 
-    # ----- simple vertical centering (push card down) -----
-    st.markdown(
-        "<div style='height: 12vh'></div>",
-        unsafe_allow_html=True,
-    )
-
-    # --- Center column layout ---
+    # Simple vertical spacing to center-ish the login
+    st.markdown("<div style='height: 12vh'></div>", unsafe_allow_html=True)
     _, center, _ = st.columns([1.5, 1, 1.5])
 
     with center:
-        # small inner padding
         st.markdown(
             "<div style='padding: 1.25rem 1.5rem;'>",
             unsafe_allow_html=True,
         )
 
-        # --- Logo + title ---
+        # --- Logo + heading ---
         path = logo_path()
         app_heading = f"{APP_NAME} - Login"
+
         if path:
             svg_text = path.read_text(encoding="utf-8")
             b64 = base64.b64encode(svg_text.encode("utf-8")).decode("ascii")
@@ -103,31 +71,29 @@ def require_login():
                     </span>
                 </div>
                 """,
-                unsafe_allow_html=True
+                unsafe_allow_html=True,
             )
 
+        # --- Login card ---
         with st.container(border=True):
-            # --- Username / Password fields ---
             username = st.text_input("Username")
             password = st.text_input("Password", type="password")
 
-            # space before button
             st.markdown("<div style='height: 0.75rem;'></div>", unsafe_allow_html=True)
 
-            # --- Login button ---
             if st.button("Login"):
-                try:
-                    expected_password = get_admin_password()
-                except Exception as exc:  # noqa: BLE001
-                    st.error(f"Unable to retrieve application credentials. Please contact the administrator. ({exc})")
-                    st.stop()
-
-                if username == APP_USERNAME and password == expected_password:
+                user = authenticate_user(username, password)
+                if user is None:
+                    st.error("Invalid username or password.")
+                else:
                     st.session_state["authenticated"] = True
+                    st.session_state["username"] = user["username"]
+                    st.session_state["display_name"] = user.get("name") or user["username"]
+                    st.session_state["role_ids"] = user["role_ids"]
+                    st.session_state["allowed_page_keys"] = user["allowed_page_keys"]
+
                     st.success("Login successful.")
                     st.rerun()
-                else:
-                    st.error("Invalid username or password.")
 
-    # User not authenticated yet; stop the app so pages don't render
+    # Do not render any other pages until authenticated
     st.stop()

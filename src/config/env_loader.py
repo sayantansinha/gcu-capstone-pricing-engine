@@ -68,6 +68,7 @@ class Settings:
     FIGURES_DIR: str = _pjoin(DATA_DIR, getenv("FIGURES_DIR", "figures"))
     MODELS_DIR: str = _pjoin(DATA_DIR, getenv("MODELS_DIR", "models"))
     REPORTS_DIR: str = _pjoin(DATA_DIR, getenv("REPORTS_DIR", "reports"))
+    SECURITY_DIR: str = _pjoin(DATA_DIR, getenv("SECURITY_DIR", "reports"))
 
     # S3 buckets + prefixes
     RAW_BUCKET: str = getenv("RAW_BUCKET")
@@ -76,6 +77,7 @@ class Settings:
     FIGURES_BUCKET: str = getenv("FIGURES_BUCKET")
     MODELS_BUCKET: str = getenv("MODELS_BUCKET")
     REPORTS_BUCKET: str = getenv("REPORTS_BUCKET")
+    SECURITY_BUCKET: str = getenv("SECURITY_BUCKET")
     FEATURE_MASTER_PREFIX: str = getenv("FEATURE_MASTER_PREFIX", "feature_master_")
 
     # AWS config

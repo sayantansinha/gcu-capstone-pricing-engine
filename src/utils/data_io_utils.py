@@ -41,7 +41,7 @@ class RunInfo:
 # -----------------------------
 # Helpers: resolve where to write/read
 # -----------------------------
-def _is_s3() -> bool:
+def is_s3() -> bool:
     return SETTINGS.IO_BACKEND == "S3"
 
 
@@ -62,7 +62,7 @@ def save_raw(df: pd.DataFrame, base_dir: str, name: str) -> str:
     Save raw dataset either to local or S3.
     base_dir acts as a subdirectory (LOCAL) or a prefix (S3).
     """
-    if _is_s3():
+    if is_s3():
         _ensure_buckets()
         key = f"{base_dir.strip('/')}/{name}.parquet"
         write_dataframe_parquet(df, SETTINGS.RAW_BUCKET, key, index=False)
@@ -81,7 +81,7 @@ def load_raw(path_or_name: str, base_dir: Optional[str] = None) -> pd.DataFrame:
     """
     Load raw dataset. If S3, pass name without suffix + base_dir; if LOCAL, pass a full path.
     """
-    if _is_s3():
+    if is_s3():
         name = path_or_name if path_or_name.endswith(".parquet") else f"{path_or_name}.parquet"
         key = f"{base_dir.strip('/')}/{name}" if base_dir else name
         LOGGER.info(f"Loading raw (S3) ← s3://{SETTINGS.RAW_BUCKET}/{key}")
@@ -93,7 +93,7 @@ def load_raw(path_or_name: str, base_dir: Optional[str] = None) -> pd.DataFrame:
 
 
 def list_raw_files(base_dir: str) -> List[str]:
-    if _is_s3():
+    if is_s3():
         prefix = f"{base_dir.strip('/')}/"
         keys = [k for k in list_bucket_objects(SETTINGS.RAW_BUCKET, prefix) if k.endswith(".parquet")]
         keys.sort()
@@ -188,7 +188,7 @@ def save_from_url(url: str, base_dir: str, cap_n_rows: int = 50000) -> str:
 # Processed data
 # -----------------------------
 def save_processed(df: pd.DataFrame, base_dir: str, name: str) -> str:
-    if _is_s3():
+    if is_s3():
         _ensure_buckets()
         key = f"{base_dir.strip('/')}/{name}.parquet"
         write_dataframe_parquet(df, SETTINGS.PROCESSED_BUCKET, key, index=False)
@@ -204,7 +204,7 @@ def save_processed(df: pd.DataFrame, base_dir: str, name: str) -> str:
 
 
 def load_processed(name: str, base_dir: str = None) -> pd.DataFrame:
-    if _is_s3():
+    if is_s3():
         name = name if name.endswith(".parquet") else f"{name}.parquet"
         key = f"{base_dir.strip('/')}/{name}" if base_dir else name
         LOGGER.info(f"Loading processed (S3) ← s3://{SETTINGS.PROCESSED_BUCKET}/{key}")
@@ -233,7 +233,7 @@ def save_figure(fig, base_dir: str, name: str) -> str:
     else:
         base_name = f"{name}.png"
 
-    if _is_s3():
+    if is_s3():
         _ensure_buckets()
 
         buf = BytesIO()
@@ -285,7 +285,7 @@ def load_figure(path_or_uri: str):
 def save_profile(profile_obj: dict, base_dir: str, name: str) -> str:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
     filename = f"{name}_{timestamp}.json"
-    if _is_s3():
+    if is_s3():
         _ensure_buckets()
         key = f"{base_dir.strip('/')}/{filename}"
         write_bucket_object(
@@ -315,7 +315,7 @@ def latest_file_under_directory(
         suffix: str = ".parquet",
         exclusion: str = None
 ) -> Optional[str]:
-    if _is_s3():
+    if is_s3():
         # Default to processed bucket / root if no base provided
         base_prefix = "" if under_dir is None else str(under_dir).strip("/")
         search = f"{base_prefix}/{prefix}".strip("/")
@@ -364,7 +364,7 @@ def save_report_pdf(base_dir: str, name: str, pdf_bytes: bytes) -> str:
     """
     filename = f"{name}.pdf"
 
-    if _is_s3():
+    if is_s3():
         _ensure_buckets()
         bucket = getattr(SETTINGS, "REPORTS_BUCKET", None)
         if not bucket:
@@ -403,7 +403,7 @@ def latest_report_for_run(
         S3    → s3://bucket/key URI
         None  → if nothing found
     """
-    if _is_s3():
+    if is_s3():
         bucket = getattr(SETTINGS, "REPORTS_BUCKET", None)
         if not bucket:
             LOGGER.warning("REPORTS_BUCKET not configured; latest_report_for_run → None")
@@ -480,7 +480,7 @@ def list_report_runs() -> List[str]:
     List run_ids (base_dir) that have at least one report saved,
     abstracting over LOCAL vs S3.
     """
-    if _is_s3():
+    if is_s3():
         bucket = getattr(SETTINGS, "REPORTS_BUCKET", None)
         if not bucket:
             LOGGER.warning("REPORTS_BUCKET not configured; list_report_runs → []")
@@ -526,7 +526,7 @@ def list_reports_for_run(
     """
     run_id = run_id.strip("/")
 
-    if _is_s3():
+    if is_s3():
         bucket = getattr(SETTINGS, "REPORTS_BUCKET", None)
         if not bucket:
             LOGGER.warning("REPORTS_BUCKET not configured; list_reports_for_run → []")

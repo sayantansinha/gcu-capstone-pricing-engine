@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple
 
 from src.config.env_loader import SETTINGS
-from src.utils.data_io_utils import RunInfo, _is_s3
+from src.utils.data_io_utils import RunInfo, is_s3
 from src.utils.log_utils import get_logger
 from src.utils.model_io_utils import (
     model_run_exists,
@@ -31,7 +31,7 @@ def _list_model_run_ids() -> List[str]:
         - Uses MODELS_BUCKET and returns the first path segment
           before '/' as run_id.
     """
-    if _is_s3():
+    if is_s3():
         bucket = getattr(SETTINGS, "MODELS_BUCKET", None)
         if not bucket:
             LOGGER.warning("MODELS_BUCKET not configured; _list_model_run_ids → []")
@@ -84,7 +84,7 @@ def get_latest_run_id() -> Optional[str]:
 # Pipeline stage status (RunInfo)
 # --------------------------------------------------------------------
 def _has_any_parquet_in_raw(run_id: str) -> bool:
-    if _is_s3():
+    if is_s3():
         bucket = getattr(SETTINGS, "RAW_BUCKET", None)
         if not bucket:
             return False
@@ -113,7 +113,7 @@ def _feature_master_flags(run_id: str) -> Tuple[bool, bool]:
     has_fm = False
     has_fm_clean = False
 
-    if _is_s3():
+    if is_s3():
         bucket = getattr(SETTINGS, "PROCESSED_BUCKET", None)
         if not bucket:
             return False, False
@@ -283,7 +283,7 @@ def _check_s3_connectivity() -> Tuple[bool, Optional[str]]:
     Simple connectivity probe for S3-based backends.
     Tries to list objects from MODELS_BUCKET or RAW_BUCKET.
     """
-    if not _is_s3():
+    if not is_s3():
         return False, None
 
     bucket = getattr(SETTINGS, "MODELS_BUCKET", None) or getattr(
