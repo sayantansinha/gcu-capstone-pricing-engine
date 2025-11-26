@@ -10,7 +10,7 @@ from src.config.page_constants import PAGE_KEY_PIPELINE, PAGE_KEY_HOME, PAGE_KEY
 from src.services.security.auth_service import user_can_access_page
 from src.ui.admin.admin import render_admin
 from src.ui.auth import require_login
-from src.ui.bundling.compare_and_bundling import render_compare_and_bundling
+from src.ui.compare_and_bundling.compare_and_bundling import render_compare_and_bundling
 from src.ui.common import inject_css_from_file, APP_NAME
 from src.ui.home.home import render_home
 from src.ui.menu import get_nav

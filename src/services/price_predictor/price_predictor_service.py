@@ -10,7 +10,7 @@ import joblib
 import numpy as np
 import pandas as pd
 
-from src.utils.data_io_utils import save_processed
+from src.utils.data_io_utils import save_processed, save_predictions, save_prediction_metadata
 from src.utils.log_utils import get_logger
 from src.utils.model_io_utils import (
     load_model_registry,
@@ -243,6 +243,92 @@ def build_manual_feature_row(model: Any, asset_features: Dict[str, Any]) -> pd.D
     return X
 
 
+def build_feature_matrix_from_raw(model: Any, df_raw: pd.DataFrame) -> pd.DataFrame:
+    """
+    Build a feature matrix from a raw prediction DataFrame so that it matches
+    the model's training feature names.
+
+    Supports the same raw columns as build_manual_feature_row, but vectorised:
+      - territory  (e.g. 'USA')
+      - media      (e.g. 'SVOD')
+      - platform   (e.g. 'NETFLIX')
+      - exclusivity (currently ignored unless you added exclusivity_* features)
+      - release_year
+      - imdb_votes or numVotes
+      - units (optional; defaults to 1 if feature exists)
+
+    If the input already looks like a feature matrix (all required feature names
+    are present and no obvious raw categorical columns), it is passed through
+    (subset to the feature_names_in_ order).
+    """
+    if df_raw.empty:
+        raise ValueError("Input DataFrame for prediction is empty.")
+
+    feature_names = _get_feature_names_for_model(model)
+    cols = list(feature_names)
+
+    # If df_raw already has all feature columns and NO raw categorical columns,
+    # treat it as an engineered feature matrix and just subset to the right order.
+    raw_categorical_cols = {"territory", "media", "platform", "exclusivity"}
+    if set(cols).issubset(df_raw.columns) and not (raw_categorical_cols & set(df_raw.columns)):
+        return df_raw[cols].copy()
+
+    # Otherwise, treat df_raw as raw metadata and construct the feature matrix.
+    X = pd.DataFrame(0.0, index=df_raw.index, columns=cols, dtype=float)
+
+    # numeric: release_year
+    if "release_year" in cols and "release_year" in df_raw.columns:
+        X["release_year"] = df_raw["release_year"].astype(float)
+
+    # numeric: units (if used in model)
+    if "units" in cols:
+        if "units" in df_raw.columns:
+            X["units"] = df_raw["units"].astype(float)
+        else:
+            X["units"] = 1.0
+
+    # numeric: log1p_numVotes from imdb_votes / numVotes
+    if "log1p_numVotes" in cols:
+        votes_series = None
+        if "imdb_votes" in df_raw.columns:
+            votes_series = df_raw["imdb_votes"]
+        elif "numVotes" in df_raw.columns:
+            votes_series = df_raw["numVotes"]
+
+        if votes_series is not None:
+            X["log1p_numVotes"] = np.log1p(votes_series.astype(float))
+        else:
+            X["log1p_numVotes"] = 0.0
+
+    # one-hot: territory_<CODE>
+    if "territory" in df_raw.columns:
+        codes = df_raw["territory"].astype(str)
+        for code in codes.unique():
+            col = f"territory_{code}"
+            if col in cols:
+                X.loc[codes == code, col] = 1.0
+
+    # one-hot: media_<CODE>
+    if "media" in df_raw.columns:
+        codes = df_raw["media"].astype(str)
+        for code in codes.unique():
+            col = f"media_{code}"
+            if col in cols:
+                X.loc[codes == code, col] = 1.0
+
+    # one-hot: platform_<CODE>
+    if "platform" in df_raw.columns:
+        codes = df_raw["platform"].astype(str)
+        for code in codes.unique():
+            col = f"platform_{code}"
+            if col in cols:
+                X.loc[codes == code, col] = 1.0
+
+    # If later you add exclusivity_* engineered features, handle them here similarly.
+
+    return X
+
+
 # ---------------------------------------------------------------------
 # Prediction helpers
 # ---------------------------------------------------------------------
@@ -252,14 +338,22 @@ def predict_for_dataframe(
         price_column_name: str = "predicted_price",
 ) -> pd.DataFrame:
     """
-    Run predictions for a feature DataFrame using the loaded model.
+    Run predictions for a DataFrame using the loaded model.
 
-    Assumes df_features already matches the training feature schema.
+    If df_features is already an engineered feature matrix that matches
+    the model's training schema (feature_names_in_), it is used directly.
+    Otherwise it is treated as raw metadata and transformed via
+    build_feature_matrix_from_raw().
     """
     if df_features.empty:
         raise ValueError("Input DataFrame for prediction is empty.")
 
-    preds = model.predict(df_features)
+    # Build X that matches the training feature schema
+    X = build_feature_matrix_from_raw(model, df_features)
+
+    preds = model.predict(X)
+
+    # Return original columns + predicted price, so the user keeps their input context
     out = df_features.copy()
     out[price_column_name] = preds
     return out
@@ -323,3 +417,130 @@ def compute_confidence_interval_and_score(
         confidence = max(0.0, min(0.99, 1.0 - rmse / abs(price))) * 100.0
 
     return ci_low, ci_high, confidence
+
+
+# ---------------------------------------------------------------------
+# Reporting / audit helpers for prediction runs
+# ---------------------------------------------------------------------
+def _now_ts_compact() -> str:
+    return datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+
+
+def save_single_prediction_audit(
+        option: RegistryModelOption,
+        asset_features: Dict[str, Any],
+        price: float,
+        ci_low: Optional[float],
+        ci_high: Optional[float],
+        confidence_pct: Optional[float],
+) -> Dict[str, str]:
+    """
+    Persist a single-asset prediction run:
+
+      - Parquet row with model + prediction + raw features
+      - JSON metadata with CI / confidence + registry metrics
+
+    Returns:
+        dict with {"data_ref": ..., "meta_ref": ...}
+    """
+    ts = _now_ts_compact()
+    base_dir = "price"
+    name = f"single_{ts}"
+
+    metrics = option.metrics or {}
+    rmse = None
+    for key in ("rmse", "RMSE", "val_rmse"):
+        if key in metrics:
+            try:
+                rmse = float(metrics[key])
+                break
+            except (TypeError, ValueError):
+                continue
+
+    row: Dict[str, Any] = {
+        "timestamp_utc": ts,
+        "mode": "single",
+        "run_id": option.run_id,
+        "model_name": option.model_name,
+        "status": option.status,
+        "predicted_price": price,
+        "ci_low": ci_low,
+        "ci_high": ci_high,
+        "confidence_pct": confidence_pct,
+        "rmse": rmse,
+    }
+    # flatten raw features (prefixed)
+    for k, v in (asset_features or {}).items():
+        row[f"raw_{k}"] = v
+
+    df = pd.DataFrame([row])
+    data_ref = save_predictions(df, base_dir=base_dir, name=name)
+
+    meta = {
+        "timestamp_utc": ts,
+        "mode": "single",
+        "run_id": option.run_id,
+        "model_name": option.model_name,
+        "status": option.status,
+        "metrics": metrics,
+        "predicted_price": price,
+        "ci": {"low": ci_low, "high": ci_high},
+        "confidence_pct": confidence_pct,
+        "data_ref": data_ref,
+    }
+    meta_ref = save_prediction_metadata(meta, base_dir=base_dir, name=name)
+
+    LOGGER.info("Saved single prediction audit → data=%s meta=%s", data_ref, meta_ref)
+    return {"data_ref": data_ref, "meta_ref": meta_ref}
+
+
+def save_batch_prediction_audit(
+        option: RegistryModelOption,
+        pred_df: pd.DataFrame,
+        input_ref: Optional[str],
+        ci_low: Optional[float],
+        ci_high: Optional[float],
+        confidence_pct: Optional[float],
+) -> Dict[str, str]:
+    """
+    Persist a batch (multi-asset) prediction run:
+
+      - Full prediction dataset as Parquet
+      - JSON metadata with summary stats + links
+    """
+    if pred_df.empty:
+        return {}
+
+    ts = _now_ts_compact()
+    base_dir = "price"
+    name = f"batch_{ts}"
+
+    metrics = option.metrics or {}
+    prices = pred_df["predicted_price"].astype(float)
+    summary = {
+        "timestamp_utc": ts,
+        "mode": "batch",
+        "run_id": option.run_id,
+        "model_name": option.model_name,
+        "status": option.status,
+        "n_assets": int(len(pred_df)),
+        "avg_price": float(prices.mean()),
+        "min_price": float(prices.min()),
+        "max_price": float(prices.max()),
+        "ci_low": ci_low,
+        "ci_high": ci_high,
+        "confidence_pct": confidence_pct,
+    }
+
+    data_ref = save_predictions(pred_df, base_dir=base_dir, name=name)
+
+    meta = {
+        **summary,
+        "metrics": metrics,
+        "input_ref": input_ref,
+        "data_ref": data_ref,
+    }
+    meta_ref = save_prediction_metadata(meta, base_dir=base_dir, name=name)
+
+    LOGGER.info("Saved batch prediction audit → data=%s meta=%s", data_ref, meta_ref)
+    return {"data_ref": data_ref, "meta_ref": meta_ref}

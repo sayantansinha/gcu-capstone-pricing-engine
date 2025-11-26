@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Final
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -12,31 +13,26 @@ from src.services.price_predictor.price_predictor_service import (
     load_stacked_model,
     predict_for_dataframe,
     predict_for_single_asset,
-    save_uploaded_assets_df, compute_confidence_interval_and_score,
+    save_uploaded_assets_df,
+    compute_confidence_interval_and_score, save_batch_prediction_audit, save_single_prediction_audit,
 )
-from src.utils.log_utils import get_logger
 
-LOGGER = get_logger("ui_price_predictor")
+_ASSET_INPUT_LBL_SINGLE: Final[str] = "Enter asset manually"
+_ASSET_INPUT_LBL_MULTI: Final[str] = "Upload asset file"
 
 
 # -------------------------------------------------------------------
 # Helper functions – input / forms
 # -------------------------------------------------------------------
-def _load_predictor_option_lists() -> Dict[str, Dict[str, str]]:
+def _load_predictor_option_lists() -> Dict[str, dict]:
     """
-    Load ui_config.toml using the global config loader and extract:
+    Load ui_config.toml using the global config loader and extract ONLY:
       - territories
       - medias
       - platforms
       - license_types
 
-    Returns:
-        {
-          "territories": {code -> label},
-          "medias": {code -> label},
-          "platforms": {code -> label},
-          "license_types": {code -> label},
-        }
+    Each entry is a mapping CODE -> LABEL.
     """
     try:
         cfg = load_config_from_file("src/config/ui_config.toml")
@@ -48,7 +44,7 @@ def _load_predictor_option_lists() -> Dict[str, Dict[str, str]]:
             "license_types": {},
         }
 
-    def get_map(key: str) -> Dict[str, str]:
+    def get_map(key: str) -> dict:
         val = cfg.get(key)
         return val if isinstance(val, dict) else {}
 
@@ -162,11 +158,12 @@ def _handle_file_upload() -> Tuple[Optional[pd.DataFrame], Optional[str]]:
     upload_name: Optional[str] = None
 
     st.markdown(
-        "Upload a CSV or Parquet file with **one row per asset** and the same "
-        "feature columns that the model was trained on (your feature-master schema)."
+        "Upload a CSV or Parquet file with **one row per asset** and either "
+        "raw metadata columns (territory, media, platform, imdb_votes, etc.) "
+        "or the full feature-master schema the model was trained on."
     )
     uploaded_file = st.file_uploader(
-        "Upload feature dataset",
+        "Upload asset dataset",
         type=["csv", "parquet"],
         accept_multiple_files=False,
     )
@@ -185,8 +182,8 @@ def _handle_file_upload() -> Tuple[Optional[pd.DataFrame], Optional[str]]:
             f"Loaded {len(uploaded_df):,} records from `{upload_name}` "
             f"with {len(uploaded_df.columns)} columns."
         )
-        with st.expander("Preview uploaded dataset", expanded=False):
-            st.dataframe(uploaded_df.head(50))
+        st.markdown("#### Preview of uploaded dataset")
+        st.dataframe(uploaded_df.head(50))
 
     except Exception as ex:  # noqa: BLE001
         st.error(f"Error reading uploaded file: {ex}")
@@ -213,41 +210,16 @@ def _render_inputs(
     - prediction mode radio
     - file upload OR manual form
     - predict button
-
-    Returns:
-        (
-            selected_option,
-            input_mode,
-            uploaded_df,
-            manual_asset,
-            upload_name,
-            submitted
-        )
     """
     with st.expander("Asset Input", expanded=True):
         input_mode = st.radio(
             "Asset Selection",
             options=[
-                "Upload asset file",
-                "Enter asset manually",
+                _ASSET_INPUT_LBL_MULTI,
+                _ASSET_INPUT_LBL_SINGLE,
             ],
             key="predict_price_input_mode",
         )
-
-        uploaded_df: Optional[pd.DataFrame] = None
-        manual_asset: Optional[Dict[str, Any]] = None
-        upload_name: Optional[str] = None
-
-        if input_mode == "Upload asset file":
-            uploaded_df, upload_name = _handle_file_upload()
-        else:
-            st.markdown(
-                "Enter feature values for a single media asset. "
-                "Field names should align with the model's expected feature columns."
-            )
-            manual_asset = _render_manual_asset_form()
-
-        st.markdown("---")
 
         labels = [opt.label for opt in options]
         selected_label = st.selectbox(
@@ -258,15 +230,29 @@ def _render_inputs(
         selected_option = options[labels.index(selected_label)]
 
         # Format date as MON DD, YYYY (e.g., JAN 05, 2025)
-        created_str = selected_option.created_at.strftime("%b %d, %Y")
+        created_str = selected_option.created_at.strftime("%b %d, %Y").upper()
         st.caption(
             f"Using model **{selected_option.model_name}** "
-            f"(Pipeline Run =`{selected_option.run_id}`, "
-            f"Created on {created_str})."
+            f"(Pipeline Run ID=`{selected_option.run_id}`, "
+            f"created on {created_str})."
         )
 
-        # Button to predict
-        submitted = st.button("Predict Price", type="primary")
+        st.markdown("---")
+
+        uploaded_df: Optional[pd.DataFrame] = None
+        manual_asset: Optional[Dict[str, Any]] = None
+        upload_name: Optional[str] = None
+
+        if input_mode == _ASSET_INPUT_LBL_MULTI:
+            uploaded_df, upload_name = _handle_file_upload()
+        else:
+            st.markdown(
+                "Enter feature values for a single media asset. "
+                "Field names should align with the model's expected feature columns."
+            )
+            manual_asset = _render_manual_asset_form()
+
+        submitted = st.button("Run prediction", type="primary")
 
     return selected_option, input_mode, uploaded_df, manual_asset, upload_name, submitted
 
@@ -283,6 +269,15 @@ def _render_single_asset_result(
         ci_high: Optional[float],
         confidence_pct: Optional[float],
 ) -> None:
+    """
+    Render rich single-asset view:
+
+      1. Price card
+      2. CI / confidence / model version row
+      3. Top active features bar chart
+      4. RMSE-based error band info
+      5. Raw asset metadata
+    """
     # 1. Price card
     st.markdown(
         f"""
@@ -318,7 +313,7 @@ def _render_single_asset_result(
 
     st.markdown("---")
 
-    # 3. Top active features chart (no expander)
+    # 3. Top active features bar chart (from engineered row)
     st.markdown("#### Top active features for this prediction")
     if not df_single.empty:
         row = df_single.iloc[0].drop(labels=["predicted_price"], errors="ignore")
@@ -337,7 +332,7 @@ def _render_single_asset_result(
     else:
         st.caption("No feature data available for this prediction.")
 
-    # 4. Error band info
+    # 4. RMSE / error band info
     metrics = registry_option.metrics or {}
     rmse = None
     for key in ("rmse", "RMSE", "val_rmse"):
@@ -357,7 +352,7 @@ def _render_single_asset_result(
             f"${band_low:,.0f} to ${band_high:,.0f}."
         )
 
-    # 5. Asset metadata (plain section, no expander)
+    # 5. Raw asset metadata
     if asset_features:
         st.markdown("#### Asset metadata used for this prediction")
         st.json(asset_features)
@@ -366,14 +361,18 @@ def _render_single_asset_result(
 def _render_multi_asset_results(
         pred_df: pd.DataFrame,
         registry_option: RegistryModelOption,
+        ci_low: Optional[float],
+        ci_high: Optional[float],
+        confidence_pct: Optional[float],
 ) -> None:
     """
-    Render multi-asset results with a layout that parallels the single-asset view:
+    Render batch view with layout parallel to single-asset:
 
-      1. Card with average predicted price
-      2. Metrics row (count, min, max)
-      3. Approximate CI / error band based on RMSE
-      4. Full predictions table + download
+      1. Price card (average price)
+      2. CI / confidence / model version row
+      3. Price distribution chart
+      4. RMSE-based error band info
+      5. Predictions table
     """
     if "predicted_price" not in pred_df.columns:
         st.error("Prediction DataFrame does not have a 'predicted_price' column.")
@@ -383,7 +382,7 @@ def _render_multi_asset_results(
     price_series = pred_df["predicted_price"].astype(float)
     avg_price = float(price_series.mean())
 
-    # 1. Card – average predicted price for the batch
+    # 1. Price card (average price)
     st.markdown(
         f"""
         <div class="ppe-price-card">
@@ -394,24 +393,47 @@ def _render_multi_asset_results(
         unsafe_allow_html=True,
     )
 
-    # 2. Metrics row
+    # 2. CI / confidence / model version (same structure as single)
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.markdown("**Assets in batch**")
-        st.markdown(f"{n_rows:,}")
+        st.markdown("**Confidence interval (approx. 95%)**")
+        if ci_low is not None and ci_high is not None:
+            st.markdown(f"${ci_low:,.0f} – ${ci_high:,.0f}")
+        else:
+            st.markdown("_Not available_")
+
     with col2:
-        st.markdown("**Min predicted price**")
-        st.markdown(f"${price_series.min():,.0f}")
+        st.markdown("**Prediction confidence**")
+        if confidence_pct is not None:
+            st.markdown(f"{confidence_pct:0.0f}%")
+        else:
+            st.markdown("_Not available_")
+
     with col3:
-        st.markdown("**Max predicted price**")
-        st.markdown(f"${price_series.max():,.0f}")
+        st.markdown("**Model version**")
+        model_label = registry_option.model_name or "N/A"
+        run_id = registry_option.run_id or "N/A"
+        st.markdown(f"`{model_label}`  \nPipeline Run ID: `{run_id}`")
 
-    # 3. CI / error band based on RMSE (same logic as single-asset)
-    ci_low, ci_high, conf_pct = compute_confidence_interval_and_score(
-        avg_price,
-        registry_option.metrics,
-    )
+    st.markdown("---")
 
+    # 3. Price distribution chart ("graph")
+    st.markdown("#### Predicted price distribution for this batch")
+    if n_rows > 0:
+        # Build a simple histogram as bar chart
+        hist, bin_edges = np.histogram(price_series, bins=min(10, max(1, n_rows)))
+        bin_labels = [
+            f"{bin_edges[i]:,.0f}–{bin_edges[i + 1]:,.0f}"
+            for i in range(len(bin_edges) - 1)
+        ]
+        hist_df = pd.DataFrame({"Price bin": bin_labels, "Count": hist}).set_index(
+            "Price bin"
+        )
+        st.bar_chart(hist_df)
+    else:
+        st.caption("No predictions available for this batch.")
+
+    # 4. RMSE / error band info around the average price
     metrics = registry_option.metrics or {}
     rmse = None
     for key in ("rmse", "RMSE", "val_rmse"):
@@ -422,29 +444,18 @@ def _render_multi_asset_results(
             except (TypeError, ValueError):
                 continue
 
-    if ci_low is not None and ci_high is not None:
-        st.markdown("**Approx. 95% interval for average price**")
-        st.markdown(f"${ci_low:,.0f} – ${ci_high:,.0f}")
-
     if rmse is not None and rmse > 0:
         band_low = avg_price - 2 * rmse
         band_high = avg_price + 2 * rmse
         st.info(
-            f"For assets similar to this batch, the model's RMSE is approximately "
-            f"${rmse:,.0f}. A typical error band around the average prediction is "
-            f"from ${band_low:,.0f} to ${band_high:,.0f}."
+            f"For batches of assets similar to this one, the model's RMSE is approximately "
+            f"${rmse:,.0f}. A typical error band around the average prediction is from "
+            f"${band_low:,.0f} to ${band_high:,.0f}."
         )
 
-    # 4. Predictions table
+    # 5. Predictions table
     st.markdown("#### Predictions table")
     st.dataframe(pred_df)
-
-    st.download_button(
-        "⬇️ Download predictions (CSV)",
-        data=pred_df.to_csv(index=False).encode("utf-8"),
-        file_name="predictions.csv",
-        mime="text/csv",
-    )
 
 
 def _run_multi_asset_prediction(
@@ -454,17 +465,17 @@ def _run_multi_asset_prediction(
         registry_option: RegistryModelOption,
 ) -> None:
     """
-    Execute and render multi-asset predictions using a layout
-    similar to the single-asset view.
+    Execute and render multi-asset predictions and persist an audit record.
     """
     if uploaded_df is None:
         st.error("No valid dataset uploaded. Please upload a file and try again.")
         return
 
+    input_ref: Optional[str] = None
     if upload_name:
         try:
-            saved_ref = save_uploaded_assets_df(uploaded_df, upload_name)
-            st.caption(f"Uploaded dataset saved for audit at: `{saved_ref}`")
+            input_ref = save_uploaded_assets_df(uploaded_df, upload_name)
+            st.caption(f"Uploaded dataset saved for audit at: `{input_ref}`")
         except Exception as ex:  # noqa: BLE001
             st.warning(f"Could not persist uploaded dataset: {ex}")
 
@@ -474,7 +485,33 @@ def _run_multi_asset_prediction(
         st.error(f"Prediction failed for uploaded dataset: {ex}")
         return
 
-    _render_multi_asset_results(pred_df, registry_option)
+    # Use average price for CI / confidence
+    price_series = pred_df["predicted_price"].astype(float)
+    avg_price = float(price_series.mean())
+    ci_low, ci_high, conf_pct = compute_confidence_interval_and_score(
+        avg_price,
+        registry_option.metrics,
+    )
+
+    # Persist batch audit (full pred_df + JSON summary)
+    try:
+        audit_refs = save_batch_prediction_audit(
+            option=registry_option,
+            pred_df=pred_df,
+            input_ref=input_ref,
+            ci_low=ci_low,
+            ci_high=ci_high,
+            confidence_pct=conf_pct,
+        )
+        st.caption(
+            f"Batch prediction run saved for reporting "
+            f"(data: `{audit_refs.get('data_ref', '')}`, "
+            f"meta: `{audit_refs.get('meta_ref', '')}`)."
+        )
+    except Exception as ex:  # noqa: BLE001
+        st.warning(f"Could not persist batch prediction audit: {ex}")
+
+    _render_multi_asset_results(pred_df, registry_option, ci_low, ci_high, conf_pct)
 
 
 def _run_single_asset_prediction(
@@ -483,7 +520,7 @@ def _run_single_asset_prediction(
         registry_option: RegistryModelOption,
 ) -> None:
     """
-    Execute and render single-asset prediction using the rich mock layout.
+    Execute and render single-asset prediction and persist an audit record.
     """
     if manual_asset is None:
         st.error("No asset metadata provided. Please fill in the form and try again.")
@@ -499,6 +536,24 @@ def _run_single_asset_prediction(
         price,
         registry_option.metrics,
     )
+
+    # Persist audit (Parquet + JSON in predictions dir/bucket)
+    try:
+        audit_refs = save_single_prediction_audit(
+            option=registry_option,
+            asset_features=manual_asset,
+            price=price,
+            ci_low=ci_low,
+            ci_high=ci_high,
+            confidence_pct=conf_pct,
+        )
+        st.caption(
+            f"Prediction run saved for reporting "
+            f"(data: `{audit_refs.get('data_ref', '')}`, "
+            f"meta: `{audit_refs.get('meta_ref', '')}`)."
+        )
+    except Exception as ex:  # noqa: BLE001
+        st.warning(f"Could not persist prediction audit: {ex}")
 
     _render_single_asset_result(
         price=price,
@@ -554,15 +609,16 @@ def render_price_predictor() -> None:
         with st.spinner("Loading model and running predictions..."):
             try:
                 model = load_stacked_model(selected_option)
-            except Exception:
-                LOGGER.exception("Could not load stacked model")
+            except Exception as ex:  # noqa: BLE001
                 st.error(
                     f"Failed to load model `{selected_option.model_name}` "
-                    f"for Pipeline Run ID `{selected_option.run_id}`. Check logs for details."
+                    f"for Pipeline Run ID `{selected_option.run_id}`: {ex}"
                 )
                 return
 
-            if input_mode == "Upload asset file":
-                _run_multi_asset_prediction(model, uploaded_df, upload_name, selected_option)
+            if input_mode == _ASSET_INPUT_LBL_MULTI:
+                _run_multi_asset_prediction(
+                    model, uploaded_df, upload_name, selected_option
+                )
             else:
                 _run_single_asset_prediction(model, manual_asset, selected_option)

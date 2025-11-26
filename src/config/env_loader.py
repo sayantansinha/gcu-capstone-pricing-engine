@@ -3,6 +3,8 @@ import os
 import posixpath
 from dataclasses import dataclass, fields
 from pathlib import Path
+from typing import Final
+
 from dotenv import load_dotenv, find_dotenv
 
 from src.utils.env_utils import getenv
@@ -33,7 +35,7 @@ def load_env():
 load_env()
 
 
-def _pjoin(*parts: str) -> str:
+def _pjoin(*parts: Final[str]) -> str:
     cleaned = []
     for p in parts:
         if not p:
@@ -58,34 +60,35 @@ def _pjoin(*parts: str) -> str:
 @dataclass
 class Settings:
     # IO backend
-    IO_BACKEND: str = getenv("IO_BACKEND", "LOCAL").upper()
+    IO_BACKEND: Final[str] = getenv("IO_BACKEND", "LOCAL").upper()
 
     # Local dirs (relative to DATA_DIR)
-    DATA_DIR: str = getenv("DATA_DIR", "./data")
-    RAW_DIR: str = _pjoin(DATA_DIR, getenv("RAW_DIR", "raw"))
-    PROCESSED_DIR: str = _pjoin(DATA_DIR, getenv("PROCESSED_DIR", "processed"))
-    PROFILES_DIR: str = _pjoin(DATA_DIR, getenv("PROFILES_DIR", "profiles"))
-    FIGURES_DIR: str = _pjoin(DATA_DIR, getenv("FIGURES_DIR", "figures"))
-    MODELS_DIR: str = _pjoin(DATA_DIR, getenv("MODELS_DIR", "models"))
-    REPORTS_DIR: str = _pjoin(DATA_DIR, getenv("REPORTS_DIR", "reports"))
-    SECURITY_DIR: str = _pjoin(DATA_DIR, getenv("SECURITY_DIR", "reports"))
+    DATA_DIR: Final[str] = getenv("DATA_DIR", "./data")
+    RAW_DIR: Final[str] = _pjoin(DATA_DIR, getenv("RAW_DIR", "raw"))
+    PROCESSED_DIR: Final[str] = _pjoin(DATA_DIR, getenv("PROCESSED_DIR", "processed"))
+    PROFILES_DIR: Final[str] = _pjoin(DATA_DIR, getenv("PROFILES_DIR", "profiles"))
+    FIGURES_DIR: Final[str] = _pjoin(DATA_DIR, getenv("FIGURES_DIR", "figures"))
+    MODELS_DIR: Final[str] = _pjoin(DATA_DIR, getenv("MODELS_DIR", "models"))
+    REPORTS_DIR: Final[str] = _pjoin(DATA_DIR, getenv("REPORTS_DIR", "reports"))
+    SECURITY_DIR: Final[str] = _pjoin(DATA_DIR, getenv("SECURITY_DIR", "reports"))
+    PREDICTIONS_DIR: Final[str] = _pjoin(DATA_DIR, getenv("PREDICTIONS_DIR", "predictions"))
 
-    # S3 buckets + prefixes
-    RAW_BUCKET: str = getenv("RAW_BUCKET")
-    PROCESSED_BUCKET: str = getenv("PROCESSED_BUCKET")
-    PROFILES_BUCKET: str = getenv("PROFILES_BUCKET")
-    FIGURES_BUCKET: str = getenv("FIGURES_BUCKET")
-    MODELS_BUCKET: str = getenv("MODELS_BUCKET")
-    REPORTS_BUCKET: str = getenv("REPORTS_BUCKET")
-    SECURITY_BUCKET: str = getenv("SECURITY_BUCKET")
-    FEATURE_MASTER_PREFIX: str = getenv("FEATURE_MASTER_PREFIX", "feature_master_")
+    # S3 buckets
+    RAW_BUCKET: Final[str] = getenv("RAW_BUCKET")
+    PROCESSED_BUCKET: Final[str] = getenv("PROCESSED_BUCKET")
+    PROFILES_BUCKET: Final[str] = getenv("PROFILES_BUCKET")
+    FIGURES_BUCKET: Final[str] = getenv("FIGURES_BUCKET")
+    MODELS_BUCKET: Final[str] = getenv("MODELS_BUCKET")
+    REPORTS_BUCKET: Final[str] = getenv("REPORTS_BUCKET")
+    SECURITY_BUCKET: Final[str] = getenv("SECURITY_BUCKET")
+    PREDICTIONS_BUCKET: Final[str] = getenv("PREDICTIONS_BUCKET")
 
     # AWS config
-    AWS_ENDPOINT_URL: str = getenv("AWS_ENDPOINT_URL")
-    AWS_REGION: str = getenv("AWS_REGION")
-    AWS_ACCESS_KEY_ID: str = getenv("AWS_ACCESS_KEY_ID")
-    AWS_SECRET_ACCESS_KEY: str = getenv("AWS_SECRET_ACCESS_KEY")
-    AWS_SESSION_TOKEN: str = getenv("AWS_SESSION_TOKEN")
+    AWS_ENDPOINT_URL: Final[str] = getenv("AWS_ENDPOINT_URL")
+    AWS_REGION: Final[str] = getenv("AWS_REGION")
+    AWS_ACCESS_KEY_ID: Final[str] = getenv("AWS_ACCESS_KEY_ID")
+    AWS_SECRET_ACCESS_KEY: Final[str] = getenv("AWS_SECRET_ACCESS_KEY")
+    AWS_SESSION_TOKEN: Final[str] = getenv("AWS_SESSION_TOKEN")
 
 
 SETTINGS = Settings()

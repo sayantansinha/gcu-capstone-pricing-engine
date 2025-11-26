@@ -48,8 +48,13 @@ def is_s3() -> bool:
 def _ensure_buckets():
     # idempotent
     for b in filter(None, [
-        SETTINGS.RAW_BUCKET, SETTINGS.PROCESSED_BUCKET, SETTINGS.PROFILES_BUCKET,
-        SETTINGS.FIGURES_BUCKET, SETTINGS.MODELS_BUCKET, SETTINGS.REPORTS_BUCKET
+        SETTINGS.RAW_BUCKET,
+        SETTINGS.PROCESSED_BUCKET,
+        SETTINGS.PROFILES_BUCKET,
+        SETTINGS.FIGURES_BUCKET,
+        SETTINGS.MODELS_BUCKET,
+        SETTINGS.REPORTS_BUCKET,
+        SETTINGS.PREDICTIONS_BUCKET
     ]):
         ensure_bucket(b)
 
@@ -557,3 +562,62 @@ def list_reports_for_run(
         ]
         files.sort(key=lambda p: p.name)
         return [str(p) for p in files]
+
+
+# -----------------------------
+# Prediction runs (single + batch)
+# -----------------------------
+def save_predictions(df: pd.DataFrame, base_dir: str, name: str) -> str:
+    """
+    Save prediction result dataset (single or batch) as Parquet.
+
+    Uses PREDICTIONS_BUCKET / PREDICTIONS_DIR when configured,
+    otherwise falls back to PROCESSED bucket/dir.
+    """
+    if is_s3():
+        _ensure_buckets()
+        bucket = getattr(SETTINGS, "PREDICTIONS_BUCKET", None) or SETTINGS.PROCESSED_BUCKET
+        key = f"{base_dir.strip('/')}/{name}.parquet"
+        write_dataframe_parquet(df, bucket, key, index=False)
+        uri = formulate_s3_uri(bucket, key)
+        LOGGER.info(f"Saved predictions (S3) → {uri}")
+        return uri
+    else:
+        root = Path(getattr(SETTINGS, "PREDICTIONS_DIR", SETTINGS.PROCESSED_DIR))
+        path = os.path.join(root / base_dir, f"{name}.parquet")
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        df.to_parquet(path, index=False)
+        LOGGER.info(f"Saved predictions (LOCAL) → {path}")
+        return path
+
+
+def save_prediction_metadata(meta: dict, base_dir: str, name: str) -> str:
+    """
+    Save prediction run metadata (JSON) alongside prediction datasets.
+
+    Uses PREDICTIONS_BUCKET / PREDICTIONS_DIR when configured,
+    otherwise falls back to PROCESSED bucket/dir.
+    """
+    filename = f"{name}.json"
+
+    if is_s3():
+        _ensure_buckets()
+        bucket = getattr(SETTINGS, "PREDICTIONS_BUCKET", None) or SETTINGS.PROCESSED_BUCKET
+        key = f"{base_dir.strip('/')}/{filename}"
+        write_bucket_object(
+            bucket,
+            key,
+            json.dumps(meta, indent=2),
+            content_type="application/json",
+        )
+        uri = formulate_s3_uri(bucket, key)
+        LOGGER.info(f"Saved prediction metadata (S3) → {uri}")
+        return uri
+    else:
+        root = Path(getattr(SETTINGS, "PREDICTIONS_DIR", SETTINGS.PROCESSED_DIR))
+        out_path = root / base_dir / filename
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, indent=2)
+        LOGGER.info(f"Saved prediction metadata (LOCAL) → {out_path}")
+        return str(out_path)
