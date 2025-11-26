@@ -1,4 +1,5 @@
 from typing import List, Dict, Any, Optional
+from datetime import datetime
 
 import streamlit as st
 import pandas as pd
@@ -8,49 +9,16 @@ from src.services.compare_and_bundling.bundling_service import (
     generate_candidate_bundles,
 )
 from src.services.compare_and_bundling.comparison_service import build_compare_table
-
-
-# ---------- Integration hooks to your existing services ---------------------
-def _fetch_predictions_for_titles(selected_title_ids: List[str]) -> pd.DataFrame:
-    """
-    Wire this to your existing price prediction service.
-
-    You will likely want to:
-      - Look up row metadata from st.session_state.bundling_titles_df
-      - Call your price prediction service per title_id (or in batch)
-      - Return a DataFrame including at least:
-
-        - title_id
-        - title_name
-        - predicted_price
-        - region / territory
-        - platform
-        - release_year
-        - genres
-        - (optional) popularity
-        - (optional) risk_proxy
-
-    For now this is a stub so the UI does not crash.
-    """
-    if not selected_title_ids:
-        return pd.DataFrame()
-
-    data = []
-    for i, tid in enumerate(selected_title_ids):
-        data.append(
-            {
-                "title_id": tid,
-                "title_name": f"Title {tid}",
-                "predicted_price": 100_000 + i * 10_000,
-                "region": "US",
-                "platform": "SVOD",
-                "release_year": 2020 + (i % 3),
-                "genres": "Drama|Thriller" if i % 2 == 0 else "Comedy",
-                "popularity": 0.5 + 0.05 * i,
-                "risk_proxy": 0.4 + 0.02 * i,
-            }
-        )
-    return pd.DataFrame(data)
+from src.services.price_predictor.price_predictor_service import (
+    RegistryModelOption,
+    get_registry_model_options,
+    load_stacked_model,
+    predict_for_dataframe,
+)
+from src.utils.data_io_utils import (
+    save_predictions,
+    save_prediction_metadata,
+)
 
 
 # ---------- Title input & options helpers ----------------------------------
@@ -64,7 +32,6 @@ def _load_titles_file(uploaded_file) -> Optional[pd.DataFrame]:
     if uploaded_file is None:
         return None
 
-    # Basic support – assume CSV for now
     try:
         df = pd.read_csv(uploaded_file)
     except Exception:
@@ -148,7 +115,257 @@ def _build_title_options_from_df(df: pd.DataFrame) -> Dict[str, str]:
     return options
 
 
+# ---------- Model selection helpers ----------------------------------------
+
+def _select_registry_model() -> Optional[RegistryModelOption]:
+    """
+    Render a registry model selectbox and return the chosen RegistryModelOption,
+    or None if no models are available.
+    """
+    options = get_registry_model_options(status_filter=None)
+    if not options:
+        st.warning("No models available in registry. Train and register a model first.")
+        return None
+
+    labels = [opt.label for opt in options]
+
+    previous_label = st.session_state.get("compare_bundling_selected_model_label")
+    default_index = labels.index(previous_label) if previous_label in labels else 0
+
+    selected_label = st.selectbox(
+        "Select model for predictions",
+        options=labels,
+        index=default_index,
+    )
+
+    st.session_state["compare_bundling_selected_model_label"] = selected_label
+
+    for opt in options:
+        if opt.label == selected_label:
+            st.session_state["compare_bundling_selected_model"] = opt
+            return opt
+
+    return None
+
+
+def _fetch_predictions_for_titles(
+        selected_title_ids: List[str],
+        titles_df: Optional[pd.DataFrame],
+        model_option: Optional[RegistryModelOption],
+) -> pd.DataFrame:
+    """
+    Use the selected registry model to predict prices for the given title IDs,
+    using the uploaded titles_df as raw metadata.
+
+    Returns a DataFrame with at least:
+      - title_id
+      - title_name
+      - predicted_price
+      - region (mapped from territory/country if needed)
+      - platform
+      - release_year
+      - genres
+    """
+    if not selected_title_ids:
+        return pd.DataFrame()
+    if titles_df is None or titles_df.empty:
+        st.warning("No titles data available; upload a titles file first.")
+        return pd.DataFrame()
+    if model_option is None:
+        st.warning("No model selected; choose a model above before running predictions.")
+        return pd.DataFrame()
+
+    id_col = _get_title_id_column(titles_df)
+    if id_col is None:
+        st.error(
+            "Could not determine title ID column in uploaded file. "
+            "Expected one of: 'title_id', 'tconst', or 'id'."
+        )
+        return pd.DataFrame()
+
+    mask = titles_df[id_col].astype(str).isin(selected_title_ids)
+    df_raw = titles_df.loc[mask].copy()
+    if df_raw.empty:
+        st.warning("Selected titles not found in uploaded titles file.")
+        return pd.DataFrame()
+
+    # Load model and run predictions using the same feature-building logic
+    # as the main price prediction service.
+    model = load_stacked_model(model_option)
+    preds_df = predict_for_dataframe(model, df_raw, price_column_name="predicted_price")
+
+    # Ensure common columns expected by compare/bundling services.
+    preds_df["title_id"] = df_raw[id_col].astype(str).values
+
+    if "title_name" not in preds_df.columns:
+        preds_df["title_name"] = df_raw.apply(_get_title_name_value, axis=1)
+
+    if "region" not in preds_df.columns:
+        if "territory" in df_raw.columns:
+            preds_df["region"] = df_raw["territory"]
+        elif "country" in df_raw.columns:
+            preds_df["region"] = df_raw["country"]
+
+    # platform, release_year, genres will already be present if they exist in df_raw.
+    # We leave them as-is.
+
+    return preds_df
+
+
+# ---------- Persistence helpers (for Reports) -------------------------------
+
+_COMPARE_BASE_DIR = "compare"
+_BUNDLING_BASE_DIR = "bundling"
+
+
+def _bundle_results_to_df(bundle_results: List[Any]) -> pd.DataFrame:
+    """
+    Flatten BundleResult objects into a row-level DataFrame.
+
+    Columns:
+      - bundle_id, strategy_name, bundle_* scores
+      - title_id, title_name, predicted_price, region, platform, release_year, genres
+    """
+    rows: List[Dict[str, Any]] = []
+
+    for i, bundle in enumerate(bundle_results, start=1):
+        bundle_id = f"bundle_{i}"
+
+        for t in bundle.titles:
+            rows.append(
+                {
+                    "bundle_id": bundle_id,
+                    "strategy_name": bundle.strategy_name,
+                    "bundle_price_raw": bundle.bundle_price_raw,
+                    "bundle_value_score": bundle.bundle_price_score,
+                    "bundle_fit_score": bundle.bundle_fit_score,
+                    "bundle_diversity_score": bundle.bundle_diversity_score,
+                    "bundle_risk_score": bundle.bundle_risk_score,
+                    "title_id": t.get("title_id"),
+                    "title_name": t.get("title_name"),
+                    "predicted_price": t.get("predicted_price"),
+                    "region": t.get("region"),
+                    "platform": t.get("platform"),
+                    "release_year": t.get("release_year"),
+                    "genres": t.get("genres"),
+                }
+            )
+
+    if not rows:
+        return pd.DataFrame()
+
+    return pd.DataFrame(rows)
+
+
+def _model_meta_dict(model_option: Optional[RegistryModelOption]) -> Optional[Dict[str, Any]]:
+    if model_option is None:
+        return None
+    return {
+        "run_id": model_option.run_id,
+        "model_name": model_option.model_name,
+        "status": model_option.status,
+        "metrics": model_option.metrics or {},
+    }
+
+
+def _persist_compare_run(
+        predictions_df: pd.DataFrame,
+        selected_ids: List[str],
+        selected_labels: List[str],
+        model_option: Optional[RegistryModelOption],
+) -> None:
+    """Persist comparison predictions + metadata for later reports."""
+    if predictions_df.empty:
+        return
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    name = f"compare_{ts}"
+    base_dir = _COMPARE_BASE_DIR  # "compare"
+
+    try:
+        predictions_uri = save_predictions(predictions_df, base_dir, name)
+    except Exception as ex:
+        st.warning(f"Unable to save comparison predictions: {ex}")
+        return
+
+    meta = {
+        "module": "compare_and_bundling",
+        "mode": "compare",
+        "base_dir": base_dir,
+        "artifact_name": name,
+        "timestamp": ts,
+        "selected_title_ids": selected_ids,
+        "selected_title_labels": selected_labels,
+        "rows": int(len(predictions_df)),
+        "columns": list(predictions_df.columns),
+        "predictions_uri": predictions_uri,
+        "model": _model_meta_dict(model_option),
+    }
+
+    try:
+        meta_uri = save_prediction_metadata(meta, base_dir, name)
+    except Exception as ex:
+        st.warning(f"Unable to save comparison metadata: {ex}")
+        meta_uri = None
+
+    st.session_state["compare_last_predictions_uri"] = predictions_uri
+    st.session_state["compare_last_metadata_uri"] = meta_uri
+
+
+def _persist_bundling_run(
+        bundle_results: List[Any],
+        candidate_ids: List[str],
+        strategy_name: str,
+        bundle_size: int,
+        model_option: Optional[RegistryModelOption],
+) -> None:
+    """Persist bundling outputs + metadata for later reports."""
+    if not bundle_results:
+        return
+
+    df = _bundle_results_to_df(bundle_results)
+    if df.empty:
+        return
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    name = f"bundling_{ts}"
+    base_dir = _BUNDLING_BASE_DIR  # "bundling"
+
+    try:
+        predictions_uri = save_predictions(df, base_dir, name)
+    except Exception as ex:
+        st.warning(f"Unable to save bundling predictions: {ex}")
+        return
+
+    meta = {
+        "module": "compare_and_bundling",
+        "mode": "bundling",
+        "base_dir": base_dir,
+        "artifact_name": name,
+        "timestamp": ts,
+        "strategy_name": strategy_name,
+        "bundle_size": int(bundle_size),
+        "candidate_title_ids": candidate_ids,
+        "bundles_count": len(bundle_results),
+        "rows": int(len(df)),
+        "columns": list(df.columns),
+        "predictions_uri": predictions_uri,
+        "model": _model_meta_dict(model_option),
+    }
+
+    try:
+        meta_uri = save_prediction_metadata(meta, base_dir, name)
+    except Exception as ex:
+        st.warning(f"Unable to save bundling metadata: {ex}")
+        meta_uri = None
+
+    st.session_state["bundling_last_predictions_uri"] = predictions_uri
+    st.session_state["bundling_last_metadata_uri"] = meta_uri
+
+
 # ---------- UI helpers ------------------------------------------------------
+
+
 def _render_compare_results(predictions_df: pd.DataFrame) -> None:
     """
     Comparison results section.
@@ -232,7 +449,7 @@ def render_compare_and_bundling() -> None:
     Render the Compare & Bundling page.
 
     Layout:
-      - Expander above tabs: Title Input (file upload)
+      - Expander above tabs: Title Input (file upload) + model selection
       - Tabs: "Compare" and "Bundling"
         - Compare tab:
             - Expander: Compare Titles (inputs)
@@ -254,13 +471,15 @@ def render_compare_and_bundling() -> None:
     if "bundling_titles_df" not in st.session_state:
         st.session_state.bundling_titles_df = None
 
-    # ---- Title input zone (above tabs) ------------------------------------
-    with st.expander("Title Input", expanded=True):
+    # ---- Title input + model selection zone (above tabs) -------------------
+    with st.expander("Title Input & Model", expanded=True):
         uploaded_file = st.file_uploader(
             "Upload titles file (CSV)",
             type=["csv"],
-            help="Provide a titles file including columns like title_id/tconst, "
-                 "title_name, territory/region, media, platform, license_type, etc.",
+            help=(
+                "Provide a titles file including columns like title_id/tconst, "
+                "title_name, territory/region, media, platform, license_type, etc."
+            ),
         )
 
         if uploaded_file is not None:
@@ -278,6 +497,8 @@ def render_compare_and_bundling() -> None:
                 "Upload a titles file to enable selection in Compare and Bundling tabs."
             )
 
+        model_option = _select_registry_model()
+
     titles_df: Optional[pd.DataFrame] = st.session_state.bundling_titles_df
     title_options: Dict[str, str] = (
         _build_title_options_from_df(titles_df) if titles_df is not None else {}
@@ -293,6 +514,9 @@ def render_compare_and_bundling() -> None:
                 st.warning(
                     "No titles available. Please upload a valid titles file above."
                 )
+                selected_labels: List[str] = []
+                selected_ids: List[str] = []
+                run_compare = False
             else:
                 title_labels = list(title_options.values())
                 title_ids = list(title_options.keys())
@@ -314,10 +538,21 @@ def render_compare_and_bundling() -> None:
 
                 if run_compare and not selected_ids:
                     st.warning("Please select at least one title to compare.")
+                    run_compare = False
 
                 if run_compare and selected_ids:
-                    predictions_df = _fetch_predictions_for_titles(selected_ids)
+                    predictions_df = _fetch_predictions_for_titles(
+                        selected_title_ids=selected_ids,
+                        titles_df=titles_df,
+                        model_option=model_option,
+                    )
                     st.session_state.compare_predictions_df = predictions_df
+                    _persist_compare_run(
+                        predictions_df=predictions_df,
+                        selected_ids=selected_ids,
+                        selected_labels=selected_labels,
+                        model_option=model_option,
+                    )
 
         # Results
         with st.expander(
@@ -334,6 +569,10 @@ def render_compare_and_bundling() -> None:
                 st.warning(
                     "No titles available. Please upload a valid titles file above."
                 )
+                run_bundle = False
+                candidate_ids: List[str] = []
+                strategy_name = ""
+                bundle_size = 0
             else:
                 strategies = get_available_strategies()
                 strategy_display_to_name = {s.display_name: s.name for s in strategies}
@@ -377,16 +616,29 @@ def render_compare_and_bundling() -> None:
                     st.warning(
                         "Not enough candidate titles to form a bundle with the selected size."
                     )
-                elif run_bundle:
-                    candidate_df = _fetch_predictions_for_titles(candidate_ids)
+                    run_bundle = False
+
+                if run_bundle:
+                    candidate_df = _fetch_predictions_for_titles(
+                        selected_title_ids=candidate_ids,
+                        titles_df=titles_df,
+                        model_option=model_option,
+                    )
                     bundle_results = generate_candidate_bundles(
                         candidate_df=candidate_df,
-                        bundle_size=bundle_size,
+                        bundle_size=int(bundle_size),
                         strategy_name=strategy_name,
                         max_anchors=10,
                         max_bundles=5,
                     )
                     st.session_state.bundle_results = bundle_results
+                    _persist_bundling_run(
+                        bundle_results=bundle_results,
+                        candidate_ids=candidate_ids,
+                        strategy_name=strategy_name,
+                        bundle_size=int(bundle_size),
+                        model_option=model_option,
+                    )
 
         # Results
         with st.expander(
