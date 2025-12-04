@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import os
+import base64
 from copy import deepcopy
 from pathlib import Path
 from typing import Final, Dict
@@ -9,21 +10,32 @@ from typing import Final, Dict
 import pandas as pd
 import streamlit as st
 
-from src.services.pipeliine.analytics.modeling_service import (
+from src.services.pipeline.analytics.modeling_service import (
     train_base_models,
     combine_average,
-    combine_weighted_inverse_rmse, AVAILABLE_MODELS, build_stacked_ensemble,
+    combine_weighted_inverse_rmse,
+    AVAILABLE_MODELS,
+    build_stacked_ensemble,
+)
+from src.services.pipeline.analytics.visual_tools_service import (
+    chart_actual_vs_pred,
+    chart_residuals,
+    chart_residuals_qq,
 )
 from src.ui.common import show_last_training_badge, store_last_model_info_in_session
 from src.ui.common import store_last_run_model_dir_in_session
 from src.utils.log_utils import streamlit_safe, get_logger
-from src.utils.model_io_utils import save_model_artifacts, register_model_in_registry, load_model_registry
+from src.utils.model_io_utils import (
+    save_model_artifacts,
+    register_model_in_registry,
+    load_model_registry,
+)
 
-LOGGER = get_logger("ui_analytical_tools")
+LOGGER = get_logger("ui_modeling")
 PRED_SRC_DISP_NAMES: Final[Dict[str, str]] = {
     "stacked_ensemble": "Stacked Ensemble",
     "weighted_ensemble": "Weighted Ensemble",
-    "average_ensemble": "Simple Average Ensemble"
+    "average_ensemble": "Simple Average Ensemble",
 }
 METRIC_NAMES: Final[Dict[str, str]] = {
     "RMSE": "Root Mean Squared Error",
@@ -45,27 +57,45 @@ def _numeric_columns(df: pd.DataFrame) -> list[str]:
 
 
 def _model_param_ui(algo: str) -> dict:
-    """Param UI for allowed models (from your excerpt)."""
+    """Param UI for allowed models."""
     params: dict = {}
     if algo in ("Ridge", "Lasso"):
-        params["alpha"] = st.number_input(f"{algo} alpha", 0.0001, 10.0, 1.0, key=f"{algo}_alpha")
+        params["alpha"] = st.number_input(
+            f"{algo} alpha", 0.0001, 10.0, 1.0, key=f"{algo}_alpha"
+        )
     elif algo == "XGBoost":
-        params["n_estimators"] = st.slider("XGBoost n_estimators", 100, 1500, 600, 50, key="xgb_ne")
+        params["n_estimators"] = st.slider(
+            "XGBoost n_estimators", 100, 1500, 600, 50, key="xgb_ne"
+        )
         params["max_depth"] = st.slider("XGBoost max_depth", 2, 12, 6, key="xgb_md")
-        params["learning_rate"] = st.number_input("XGBoost learning_rate", 0.01, 0.5, 0.05, key="xgb_lr")
+        params["learning_rate"] = st.number_input(
+            "XGBoost learning_rate", 0.01, 0.5, 0.05, key="xgb_lr"
+        )
         params["subsample"] = 0.9
         params["colsample_bytree"] = 0.9
         params["random_state"] = 42
         params["tree_method"] = "hist"
     elif algo == "LightGBM":
-        params["n_estimators"] = st.slider("LightGBM n_estimators", 100, 2000, 800, 50, key="lgb_ne")
-        params["learning_rate"] = st.number_input("LightGBM learning_rate", 0.005, 0.5, 0.05, key="lgb_lr")
-        params["max_depth"] = st.number_input("LightGBM max_depth (-1=none)", -1, 64, -1, 1, key="lgb_md")
+        params["n_estimators"] = st.slider(
+            "LightGBM n_estimators", 100, 2000, 800, 50, key="lgb_ne"
+        )
+        params["learning_rate"] = st.number_input(
+            "LightGBM learning_rate", 0.005, 0.5, 0.05, key="lgb_lr"
+        )
+        params["max_depth"] = st.number_input(
+            "LightGBM max_depth (-1=none)", -1, 64, -1, 1, key="lgb_md"
+        )
         params["random_state"] = 42
     elif algo == "MLP":
-        hl = st.text_input("MLP hidden_layer_sizes (e.g., 256,128)", value="256,128", key="mlp_hl")
-        params["hidden_layer_sizes"] = tuple(int(x.strip()) for x in hl.split(",") if x.strip())
-        params["max_iter"] = st.number_input("MLP epochs (max_iter)", 50, 2000, 300, 50, key="mlp_ep")
+        hl = st.text_input(
+            "MLP hidden_layer_sizes (e.g., 256,128)", value="256,128", key="mlp_hl"
+        )
+        params["hidden_layer_sizes"] = tuple(
+            int(x.strip()) for x in hl.split(",") if x.strip()
+        )
+        params["max_iter"] = st.number_input(
+            "MLP epochs (max_iter)", 50, 2000, 300, 50, key="mlp_ep"
+        )
         params["random_state"] = 42
     # LinearRegression has no key params here
     return params
@@ -78,21 +108,20 @@ def _multimodel_param_ui(selected_models: list[str]) -> dict[str, dict]:
         for m in selected_models:
             st.markdown(f"**{m}**")
             blocks[m] = _model_param_ui(m)
-            # st.markdown("---")
     return blocks
 
 
 def _choose_display_pred(base_out, stacked, wgt, avg):
-    # First Priority: Show Stacked ensemble
+    # First Priority: Stacked ensemble
     if isinstance(stacked, dict) and stacked.get("pred") is not None:
         pred_output = stacked["pred"], "stacked_ensemble"
-    # Second Priority: Show weighted ensemble
+    # Second Priority: Weighted ensemble
     elif isinstance(wgt, dict) and wgt.get("pred") is not None:
         pred_output = wgt["pred"], "weighted_ensemble"
-    # Third Priority: Show Simple Average ensemble
+    # Third Priority: Simple Average ensemble
     elif isinstance(avg, dict) and avg.get("pred") is not None:
         pred_output = avg["pred"], "average_ensemble"
-    # Fallback: Use the single best model based on RMSE
+    # Fallback: single best model based on RMSE
     else:
         metrics = base_out["per_model_metrics"]
         best = min(metrics, key=lambda r: r["RMSE"])["model"]
@@ -102,8 +131,8 @@ def _choose_display_pred(base_out, stacked, wgt, avg):
 
 
 def _format_val(v):
-    # format floats to 4 d.p.; use scientific for very small p-values
-    if isinstance(v, (int,)) and not isinstance(v, bool):
+    # format ints / floats; use scientific for very small p-values
+    if isinstance(v, int) and not isinstance(v, bool):
         return f"{v:d}"
     if isinstance(v, float):
         if 0 < v < 1e-4:
@@ -162,7 +191,9 @@ def _split_bp_test_results_from_model_metrics(model_metrics: list):
                 try:
                     tmp = ast.literal_eval(bp_val)
                 except (ValueError, SyntaxError):
-                    LOGGER.warning("Could not parse BP string: %s", bp_val, exc_info=True)
+                    LOGGER.warning(
+                        "Could not parse BP string: %s", bp_val, exc_info=True
+                    )
                     tmp = None
 
                 if isinstance(tmp, dict):
@@ -192,7 +223,7 @@ def _convert_bp_test_results_to_df(bp_obj) -> pd.DataFrame:
     Accepts:
       - dict with keys like: lm_stat / lm_pvalue / fvalue / f_pvalue
       - sequence/tuple of 4 (lm_stat, lm_pvalue, fvalue, f_pvalue)
-      - any mixed naming ('Lagrange multiplier statistic', etc.)
+      - any mixed naming.
     """
     LOGGER.info(f"BP output [{bp_obj}]]")
     # extract four numbers robustly
@@ -242,8 +273,74 @@ def _convert_model_metrics_to_df(model_metrics: list) -> pd.DataFrame:
     return df
 
 
+# ----------------------------------------------------------------------
+# Visual diagnostics (migrated from Visual Tools into Modeling)
+# ----------------------------------------------------------------------
+def _vt_get_truth_pred_from_last_model(res):
+    """
+    Try to retrieve y_true / y_pred from last_model payload.
+    Primary: top-level keys; fallback: base['y_true'/'y_pred'].
+    """
+    if not isinstance(res, dict):
+        return None, None
+
+    if "y_true" in res and "y_pred" in res:
+        return res["y_true"], res["y_pred"]
+
+    base = res.get("base") or {}
+    return base.get("y_true"), base.get("y_pred")
+
+
+def _vt_display_chart(img_data_uri: str):
+    """
+    Handle both data URI and raw bytes images coming back from visual_tools_service.
+    """
+    if isinstance(img_data_uri, str) and img_data_uri.startswith("data:image"):
+        # data:image/png;base64,....
+        try:
+            b64 = img_data_uri.split(",", 1)[1]
+            img_bytes = base64.b64decode(b64)
+            st.image(img_bytes, use_column_width=True)
+        except Exception as exc:
+            LOGGER.warning("Failed to decode base64 image: %s", exc)
+            st.image(img_data_uri, use_column_width=True)
+    else:
+        st.image(img_data_uri, use_column_width=True)
+
+
+def _render_visual_diagnostics(res: dict):
+    """
+    Render Actual vs Predicted and Residual diagnostics under Modeling,
+    using the same charts that were previously in the Visual Tools step.
+    """
+    y_true, y_pred = _vt_get_truth_pred_from_last_model(res)
+    if y_true is None or y_pred is None:
+        return
+
+    st.markdown("### Visual Diagnostics")
+
+    p1 = chart_actual_vs_pred(y_true, y_pred)
+    p2 = chart_residuals(y_true, y_pred)
+    p3 = chart_residuals_qq(y_true, y_pred)
+
+    # 2 charts on top row
+    c1, c2 = st.columns(2, gap="medium")
+    with c1:
+        st.caption("Actual vs Predicted")
+        _vt_display_chart(p1)
+    with c2:
+        st.caption("Residuals vs Fitted")
+        _vt_display_chart(p2)
+
+    # 1 chart on second row
+    c3, _ = st.columns(2, gap="medium")
+    with c3:
+        st.caption("Residuals Q–Q Plot")
+        _vt_display_chart(p3)
+
+
 def _show_last_model_stats():
-    """Bottom panel with the stats already in session."""
+    """Bottom panel with stats + visual diagnostics from session."""
     res = st.session_state.get("last_model") or {}
     if res:
         st.divider()
@@ -257,7 +354,10 @@ def _show_last_model_stats():
             st.markdown("**Ensemble: Stacked (meta-model)**")
             stacked_metrics = (res.get("ensemble_stacked") or {}).get("metrics")
             if stacked_metrics:
-                st.dataframe(_standardize_metrics_dict(stacked_metrics), use_container_width=True)
+                st.dataframe(
+                    _standardize_metrics_dict(stacked_metrics),
+                    use_container_width=True,
+                )
             else:
                 st.info("No stacked ensemble metrics found.")
 
@@ -266,7 +366,10 @@ def _show_last_model_stats():
             st.markdown("**Ensemble: Weighted (1/RMSE)**")
             wgt_metrics = (res.get("ensemble_wgt") or {}).get("metrics")
             if wgt_metrics:
-                st.dataframe(_standardize_metrics_dict(wgt_metrics), use_container_width=True)
+                st.dataframe(
+                    _standardize_metrics_dict(wgt_metrics),
+                    use_container_width=True,
+                )
             else:
                 st.info("No weighted ensemble metrics found.")
 
@@ -275,24 +378,35 @@ def _show_last_model_stats():
             st.markdown("**Ensemble: Simple Average**")
             avg_metrics = (res.get("ensemble_avg") or {}).get("metrics")
             if avg_metrics:
-                st.dataframe(_standardize_metrics_dict(avg_metrics), use_container_width=True)
+                st.dataframe(
+                    _standardize_metrics_dict(avg_metrics),
+                    use_container_width=True,
+                )
             else:
                 st.info("No simple average metrics found.")
 
-        # --- Per-model metrics (expanded names) ---
+        # --- Per-model metrics (expanded names) + BP extraction ---
         st.markdown("**Model Validation Metrics**")
         model_metrics = (res.get("base") or {}).get("per_model_metrics") or []
-        model_metrics, bp_results = _split_bp_test_results_from_model_metrics(model_metrics)
+        model_metrics, bp_results = _split_bp_test_results_from_model_metrics(
+            model_metrics
+        )
         model_metrics = _convert_model_metrics_to_df(model_metrics)
         st.dataframe(model_metrics)
 
-        # --- Breusch–Pagan (from top-level or base) ---
+        # --- Breusch–Pagan (from LR row) ---
         if bp_results is not None:
             st.markdown("**Heteroscedasticity (Breusch–Pagan)**")
             st.dataframe(_convert_bp_test_results_to_df(bp_results))
 
         pred_src = res.get("pred_source") or "unknown"
-        st.caption(f"**Prediction source used for visuals**: {PRED_SRC_DISP_NAMES.get(pred_src)}")
+        st.caption(
+            f"**Prediction source used for visuals**: "
+            f"{PRED_SRC_DISP_NAMES.get(pred_src, pred_src)}"
+        )
+
+        # --- Visual diagnostics (charts from former Visual Tools step) ---
+        _render_visual_diagnostics(res)
 
         run_dir = st.session_state.get("last_model_run_dir")
         if run_dir:
@@ -301,18 +415,16 @@ def _show_last_model_stats():
 
 def _render_model_registry_panel(run_id: str) -> None:
     """
-    Show registry information for the currently active model (if any),
-    and allow registration when not yet registered.
+    Show registry info for current model (if any), and allow registration.
     """
     last_model = st.session_state.get("last_model") or {}
     if not last_model:
         # Nothing trained/activated yet → no registry UI
         return
 
-    # This is the name we stored in store_last_model_info_in_session
+    # Model name stored in store_last_model_info_in_session
     model_name = last_model.get("model_name")
     if not model_name:
-        # Fallback, just in case
         model_name = f"ppe_model_{run_id}"
 
     # Load current registry index
@@ -328,7 +440,8 @@ def _render_model_registry_panel(run_id: str) -> None:
         (
             entry
             for entry in registry_entries
-            if entry.get("run_id") == run_id and entry.get("model_name") == model_name
+            if entry.get("run_id") == run_id
+               and entry.get("model_name") == model_name
         ),
         None,
     )
@@ -356,9 +469,6 @@ def _render_model_registry_panel(run_id: str) -> None:
                 meta_bits.append(f"by `{created_by}`")
             if meta_bits:
                 st.caption(", ".join(meta_bits))
-
-            # You could later add a "Promote to deployed" or "Update status" here,
-            # but for now we just show that it is already registered.
         else:
             st.info("This model is not yet registered in the global registry.")
 
@@ -371,12 +481,13 @@ def _render_model_registry_panel(run_id: str) -> None:
                     created_by=username,
                 )
                 st.success(
-                    f"Model `{model_name}` registered as **candidate** for this pipeline run."
+                    f"Model `{model_name}` registered as **candidate** "
+                    f"for this pipeline run."
                 )
 
 
 # ----------------------------------------------------------------------
-# Page render (MENU-TRIGGERED ENTRY POINT) — PARALLEL ONLY
+# Page render (MENU-TRIGGERED ENTRY POINT)
 # ----------------------------------------------------------------------
 @streamlit_safe
 def render():
@@ -410,7 +521,7 @@ def render():
                 "If left blank, the model will be saved as "
                 f"`{default_model_name}`."
             ),
-            key="model_name"
+            key="model_name",
         )
 
     # Final model name to be used for the rest of the pipeline
@@ -423,7 +534,7 @@ def render():
         target = st.selectbox(
             "Target (dependent variable)",
             num_cols,
-            index=num_cols.index(default_target) if default_target in num_cols else 0
+            index=num_cols.index(default_target) if default_target in num_cols else 0,
         )
         features = st.multiselect(
             "Feature columns (independent variables)",
@@ -434,7 +545,7 @@ def render():
             st.info("Please select at least one feature.")
             return
 
-    # Allowed models only (from your excerpt)
+    # Allowed models only
     allowed = AVAILABLE_MODELS.keys()
     with st.container(border=True):
         st.markdown("#### Model Selection")
@@ -458,18 +569,20 @@ def render():
                 df[features + [target]],
                 target,
                 selected_models,
-                params_map
+                params_map,
             )
 
         st.subheader("Per-model Validation Metrics")
-        st.dataframe(pd.DataFrame(base_train_out["per_model_metrics"]).set_index("model"))
+        st.dataframe(
+            pd.DataFrame(base_train_out["per_model_metrics"]).set_index("model")
+        )
 
         # Ensembles (computed automatically behind the scenes)
         stacked = build_stacked_ensemble(base_train_out)
         avg = combine_average(base_train_out)
         wgt = combine_weighted_inverse_rmse(base_train_out)
 
-        # Result predictions (prefer combined weighted or fallback to average)
+        # Result predictions (prefer ensembles)
         y_true = base_train_out["y_valid"]
         y_pred, pred_src = _choose_display_pred(base_train_out, stacked, wgt, avg)
 
@@ -494,7 +607,7 @@ def render():
             y_true=y_true,
             y_pred=y_pred,
             pred_src=pred_src,
-            model_name=model_name
+            model_name=model_name,
         )
         st.session_state["model_trained"] = True
 
@@ -508,13 +621,15 @@ def render():
             pred_src,
             params_map,
             selected_models,
-            model_name
+            model_name,
         )
 
         store_last_run_model_dir_in_session(artifact_location)
 
         st.success(f"Model {model_name} trained and saved to {artifact_location}")
 
+    # Always show latest stats & diagnostics if a last_model is present
     _show_last_model_stats()
 
+    # Registry panel for the active model / run
     _render_model_registry_panel(run_id)

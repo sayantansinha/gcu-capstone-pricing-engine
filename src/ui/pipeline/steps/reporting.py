@@ -7,8 +7,8 @@ from typing import Optional, Final
 
 import streamlit as st
 
-from src.services.pipeliine.analytics.reporting_service import Section, build_html_report, build_pdf_from_html
-from src.services.pipeliine.analytics.visual_tools_service import (
+from src.services.pipeline.analytics.reporting_service import Section, build_html_report, build_pdf_from_html
+from src.services.pipeline.analytics.visual_tools_service import (
     chart_actual_vs_pred, chart_residuals, chart_residuals_qq
 )
 from src.ui.common import show_last_training_badge, load_active_cleaned_feature_master_from_session

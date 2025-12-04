@@ -22,10 +22,13 @@ from src.ui.pipeline.steps.modeling import render as render_models
 from src.ui.pipeline.steps.cleaning import render_cleaning_section
 from src.ui.pipeline.steps.display_data import render_display_section
 from src.ui.pipeline.steps.exploration import render_exploration_section
-from src.ui.pipeline.steps.reporting import render as render_reports
-from src.ui.pipeline.steps.visual_tools import render as render_visuals
 from src.utils.data_io_utils import latest_file_under_directory, load_processed
-from src.utils.model_io_utils import model_run_exists, load_model_csv, load_model_json, load_model_registry
+from src.utils.model_io_utils import (
+    model_run_exists,
+    load_model_csv,
+    load_model_json,
+    load_model_registry,
+)
 from src.utils.log_utils import get_logger
 from src.utils.s3_utils import list_bucket_objects
 
@@ -120,6 +123,7 @@ def _init_run(run_id: str, is_new: bool = False) -> None:
     st.session_state.pop("_raw_preview", None)
     st.session_state.pop("last_model", None)
     st.session_state.pop("last_model_run_dir", None)
+    # NOTE: no report_generated flag anymore
     if is_new:
         LOGGER.info("Initialized NEW pipeline run [%s]", run_id)
     else:
@@ -172,7 +176,9 @@ def _probe_feature_master_artifacts(run_id: str) -> Tuple[Optional[Path], Option
     fm_raw = latest_file_under_directory("feature_master_", under_dir, exclusion="cleaned")
     fm_clean = latest_file_under_directory("feature_master_cleaned_", under_dir)
 
-    LOGGER.info("Probed feature master artifacts :: raw [%s], clean [%s]", fm_raw, fm_clean)
+    LOGGER.info(
+        "Probed feature master artifacts :: raw [%s], clean [%s]", fm_raw, fm_clean
+    )
     return fm_raw, fm_clean
 
 
@@ -326,7 +332,6 @@ def _compute_run_stage_for_chip(run_id: str) -> tuple[str, str]:
             "Could not load model registry in _compute_run_stage_for_chip: %s", ex
         )
 
-    # Order of precedence, same as original infer_stage
     if run_id in registered_run_ids:
         return "Model registered", "stage-registered"
     if has_model:
@@ -376,16 +381,17 @@ def _render_pipeline_state(
         has_model: bool,
 ):
     """
-    Render the pipeline state
+    Render the pipeline state.
     """
     ctx = {
         "files_staged": st.session_state.get("staged_files_count", 0) > 0,
-        "feature_master_exists": st.session_state.get("last_feature_master_path") is not None,
+        "feature_master_exists": st.session_state.get("last_feature_master_path")
+                                 is not None,
         "data_displayed": st.session_state.get("data_displayed"),
         "eda_performed": st.session_state.get("eda_performed"),
         "preprocessing_performed": st.session_state.get("preprocessing_performed"),
         "model_trained": st.session_state.get("model_trained"),
-        "report_generated": st.session_state.get("report_generated"),
+        # No 'report_generated' now; flow ends at modeling
     }
 
     with pipeline_flow_slot.container(border=True):
@@ -413,7 +419,9 @@ def render():
     with col_select:
         st.markdown("<div class='toolbar-new-pipeline'>", unsafe_allow_html=True)
         if run_ids:
-            default_index = run_ids.index(current_run_id) if current_run_id in run_ids else 0
+            default_index = (
+                run_ids.index(current_run_id) if current_run_id in run_ids else 0
+            )
             selected_run_id = st.selectbox(
                 "Pipeline Runs",
                 options=run_ids,
@@ -432,9 +440,12 @@ def render():
     # ---- icon button for new pipeline ----
     with col_btn:
         st.markdown("<div class='toolbar-new-pipeline'>", unsafe_allow_html=True)
-        if st.button("➕", key="btn_new_run",
-                     help="Create new pipeline run",
-                     use_container_width=True):
+        if st.button(
+                "➕",
+                key="btn_new_run",
+                help="Create new pipeline run",
+                use_container_width=True,
+        ):
             new_id = _new_run_id()
             _init_run(new_id, is_new=True)
             st.rerun()
@@ -493,7 +504,9 @@ def render():
     # Probe feature master before data exploration
     fm_raw_path, fm_clean_path = _probe_feature_master_artifacts(run_id)
     _activate_feature_master(run_id, fm_raw_path, fm_clean_path)
-    LOGGER.info("Feature master (raw) artifacts loaded and session states activated")
+    LOGGER.info(
+        "Feature master (raw) artifacts loaded and session states activated"
+    )
 
     # Display Data
     user_msg: str = "Build a Feature Master first."
@@ -534,9 +547,11 @@ def render():
     # Re-probe after cleaning, only reading cleaned feature master
     _, fm_clean_path = _probe_feature_master_artifacts(run_id)
     _activate_feature_master(run_id, fm_raw_path, fm_clean_path)
-    LOGGER.info("Feature master (clean) artifacts loaded and session states activated")
+    LOGGER.info(
+        "Feature master (clean) artifacts loaded and session states activated"
+    )
 
-    # Modeling
+    # Modeling (final step in this flow)
     with st.expander("Modeling", expanded=False):
         if fm_clean_path:
             with _suppress_child_section_panels():
@@ -545,25 +560,6 @@ def render():
             st.session_state["model_trained"] = False
             st.info("Save a cleaned Feature Master to enable modeling.")
 
-    # Re-probe after modeling and re-render flow diagram
+    # Re-probe after modeling and finalize flow diagram
     has_model = _probe_model_artifacts(run_id)
-    _render_pipeline_state(pipeline_flow_slot, fm_raw_path, fm_clean_path, has_model)
-
-    # Visual Tools
-    with st.expander("Visual Tools", expanded=False):
-        if has_model:
-            with _suppress_child_section_panels():
-                render_visuals()
-        else:
-            st.info("Train a model to enable visual tools.")
-
-    # Reporting
-    with st.expander("Reporting", expanded=False):
-        if has_model:
-            with _suppress_child_section_panels():
-                render_reports()
-        else:
-            st.session_state["report_generated"] = False
-            st.info("Train a model to enable the report generator.")
-
     _render_pipeline_state(pipeline_flow_slot, fm_raw_path, fm_clean_path, has_model)

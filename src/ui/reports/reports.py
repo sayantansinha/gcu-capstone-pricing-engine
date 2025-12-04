@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
+import ast
 import io
+import json
 import zipfile
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -15,20 +18,23 @@ from src.services.reports.reports_service import (
     build_platform_strategy,
     build_bundle_value_report,
     build_executive_summary,
+    build_model_analytics,
+    generate_model_analytics_report_pdf,
+)
+from src.utils.model_io_utils import load_model_registry
+from src.utils.data_io_utils import load_report_for_download
+from src.utils.explain_utils import permutation_importance_scores, shap_summary_df
+from src.services.pipeline.analytics.visual_tools_service import (
+    chart_actual_vs_pred,
+    chart_residuals,
+    chart_residuals_qq,
 )
 
 
 # ---------------------------------------------------------------------
-# Helpers – get REAL data from session_state and flatten bundles
+# Pricing / bundling helpers
 # ---------------------------------------------------------------------
 def _get_pricing_df_from_session() -> Optional[pd.DataFrame]:
-    """
-    Get the pricing/prediction dataframe produced by the Compare part
-    of the Compare & Bundling module.
-
-    Compare & Bundling stores this as `compare_predictions_df`
-    in session_state. If it's missing or empty, we return None.
-    """
     df = st.session_state.get("compare_predictions_df")
     if isinstance(df, pd.DataFrame) and not df.empty:
         return df
@@ -36,22 +42,6 @@ def _get_pricing_df_from_session() -> Optional[pd.DataFrame]:
 
 
 def _flatten_bundle_results(bundle_results: List[Any]) -> pd.DataFrame:
-    """
-    Flatten BundleResult objects (from Compare & Bundling) into a row-level DataFrame.
-
-    This mirrors `_bundle_results_to_df` in compare_and_bundling.py but is
-    defined here to avoid UI module cross-imports.
-
-    Columns:
-      - bundle_id, strategy_name
-      - bundle_price_raw
-      - bundle_value_score
-      - bundle_fit_score
-      - bundle_diversity_score
-      - bundle_risk_score
-      - title_id, title_name, predicted_price, region, platform,
-        release_year, genres
-    """
     rows: List[Dict[str, Any]] = []
 
     for i, bundle in enumerate(bundle_results, start=1):
@@ -84,13 +74,6 @@ def _flatten_bundle_results(bundle_results: List[Any]) -> pd.DataFrame:
 
 
 def _get_bundling_df_from_session() -> Optional[pd.DataFrame]:
-    """
-    Build a bundling DataFrame from the in-memory bundle_results produced
-    by the Bundling tab in Compare & Bundling.
-
-    If there are no bundle_results, or if flattening yields an empty
-    DataFrame, we return None.
-    """
     bundle_results = st.session_state.get("bundle_results")
     if not bundle_results:
         return None
@@ -102,23 +85,148 @@ def _get_bundling_df_from_session() -> Optional[pd.DataFrame]:
 
 
 # ---------------------------------------------------------------------
+# Model run + last_model helpers
+# ---------------------------------------------------------------------
+def _select_model_run() -> Optional[str]:
+    """
+    Select a model for analytics. The underlying key is still run_id,
+    but the user sees the model name in the dropdown.
+    """
+    registry = load_model_registry()
+    if not registry:
+        st.info(
+            "No entries found in the model registry. "
+            "Train and register at least one model to view Model Analytics."
+        )
+        return None
+
+    # Build mapping: run_id -> model_name (best-effort)
+    run_ids: List[str] = []
+    label_by_run: Dict[str, str] = {}
+
+    for entry in registry:
+        rid = entry.get("run_id")
+        if not rid:
+            continue
+        if rid in label_by_run:
+            # already captured a label for this run
+            continue
+
+        model_name = (
+                entry.get("model_display_name")
+                or entry.get("model_name")
+                or entry.get("name")
+                or entry.get("model_key")
+                or rid
+        )
+        label_by_run[rid] = str(model_name)
+        run_ids.append(rid)
+
+    run_ids = sorted(run_ids)
+    if not run_ids:
+        st.info(
+            "Model registry is present but contains no valid run_ids. "
+            "Check your training / registration pipeline."
+        )
+        return None
+
+    default_run_id = st.session_state.get("active_run_id")
+    default_index = 0
+    if default_run_id in run_ids:
+        default_index = run_ids.index(default_run_id)
+
+    def _format_run(rid: str) -> str:
+        # What the user sees: model name instead of raw run_id
+        return label_by_run.get(rid, rid)
+
+    selected_run_id = st.selectbox(
+        "Select model for analytics",
+        options=run_ids,
+        index=default_index,
+        format_func=_format_run,
+        key="reports_model_analytics_run_id",
+    )
+
+    # Stash the model name in session for downstream use (UI label + PDF)
+    st.session_state["reports_model_name_for_selected_run"] = label_by_run.get(selected_run_id)
+    return selected_run_id
+
+
+def _get_model_results_from_session() -> Dict[str, Any]:
+    """
+    Mirror the data-product project's reporting UI: pull rich results
+    from st.session_state['last_model'] produced in Analytical Tools.
+    """
+    last = st.session_state.get("last_model") or {}
+    if not isinstance(last, dict):
+        return {}
+
+    per_model = last.get("per_model_metrics")
+    if per_model is None:
+        base = last.get("base") or {}
+        per_model = base.get("per_model_metrics")
+
+    ensemble_avg = None
+    if "ensemble_avg" in last:
+        ensemble_avg = (last.get("ensemble_avg") or {}).get("metrics")
+    if ensemble_avg is None:
+        ensemble_avg = last.get("ensemble_avg_metrics")
+
+    ensemble_wgt = None
+    if "ensemble_wgt" in last:
+        ensemble_wgt = (last.get("ensemble_wgt") or {}).get("metrics")
+    if ensemble_wgt is None:
+        ensemble_wgt = last.get("ensemble_weighted_metrics")
+
+    return {
+        "per_model_metrics": per_model,
+        "ensemble_avg_metrics": ensemble_avg,
+        "ensemble_wgt_metrics": ensemble_wgt,
+        "bp_results": last.get("bp"),
+        "y_true": last.get("y_true"),
+        "y_pred": last.get("y_pred"),
+        "model": last.get("model"),
+        "X_valid": last.get("X_valid"),
+        "y_valid": last.get("y_valid"),
+        "X_sample": last.get("X_sample"),
+    }
+
+
+def _download_button_for_report(ref: str, label: str) -> None:
+    if not ref:
+        st.error("No report reference returned.")
+        return
+    try:
+        pdf_bytes = load_report_for_download(ref)
+    except Exception as ex:  # noqa: BLE001
+        st.error(f"Unable to load report for download: {ex}")
+        return
+
+    if ref.startswith("s3://"):
+        filename = ref.rsplit("/", 1)[-1]
+    else:
+        filename = Path(ref).name
+
+    st.download_button(label, data=pdf_bytes, file_name=filename, mime="application/pdf")
+
+
+def _metrics_dict_to_df(metrics: Dict[str, Any]) -> pd.DataFrame:
+    if not metrics:
+        return pd.DataFrame()
+    rows = []
+    for k, v in metrics.items():
+        if isinstance(v, (int, float)):
+            val = f"{v:.4f}"
+        else:
+            val = str(v)
+        rows.append({"Metric": str(k), "Value": val})
+    return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------
 # Main entrypoint
 # ---------------------------------------------------------------------
 def render_reports() -> None:
-    """
-    Business-facing Pricing & Licensing Reports page.
-
-    Uses REAL data from:
-
-      - Compare & Bundling:
-          * st.session_state.compare_predictions_df  → pricing_df
-          * st.session_state.bundle_results          → bundling_df (flattened)
-
-    We intentionally do NOT pull from the Price Predictor audits yet,
-    because those are persisted via audit helpers and not exposed as
-    DataFrames in session_state. This avoids guessing file locations
-    or formats.
-    """
     st.title("Reports")
 
     pricing_df = _get_pricing_df_from_session()
@@ -131,7 +239,6 @@ def render_reports() -> None:
 
     bundling_df = _get_bundling_df_from_session()
 
-    # Build all aggregate views once so we can use them in tabs and downloads
     overview = build_portfolio_overview(pricing_df, top_n=20)
     ti = build_territory_intelligence(pricing_df)
     ps = build_platform_strategy(pricing_df)
@@ -139,11 +246,10 @@ def render_reports() -> None:
     es = build_executive_summary(pricing_df)
 
     # -----------------------------------------------------------------
-    # Global download section
+    # Global downloads (business reports)
     # -----------------------------------------------------------------
     st.markdown("### Downloads")
 
-    # Download full predictions as CSV
     pricing_csv = pricing_df.to_csv(index=False).encode("utf-8")
     st.download_button(
         label="⬇️ Download full predictions (CSV)",
@@ -153,31 +259,24 @@ def render_reports() -> None:
         key="download_pricing_full_csv",
     )
 
-    # Download all report artifacts as a ZIP of CSVs
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        # Core dataset
         zf.writestr("pricing_predictions_full.csv", pricing_df.to_csv(index=False))
 
-        # Portfolio
         if not overview.by_title.empty:
             zf.writestr("portfolio_by_title.csv", overview.by_title.to_csv(index=False))
         if overview.by_genre is not None and not overview.by_genre.empty:
             zf.writestr("portfolio_by_genre.csv", overview.by_genre.to_csv(index=False))
 
-        # Territory
         if not ti.by_territory.empty:
             zf.writestr("territory_summary.csv", ti.by_territory.to_csv(index=False))
 
-        # Platform
         if not ps.by_platform.empty:
             zf.writestr("platform_summary.csv", ps.by_platform.to_csv(index=False))
 
-        # Bundles
         if bundle_report is not None and not bundle_report.bundles.empty:
             zf.writestr("bundle_summary.csv", bundle_report.bundles.to_csv(index=False))
 
-        # Executive views
         if not es.top_titles.empty:
             zf.writestr("exec_top_titles.csv", es.top_titles.to_csv(index=False))
         if not es.top_territories.empty:
@@ -196,18 +295,248 @@ def render_reports() -> None:
 
     st.markdown("---")
 
-    tab_portfolio, tab_territory, tab_platform, tab_bundle, tab_exec = st.tabs(
+    tab_portfolio, tab_territory, tab_platform, tab_bundle, tab_exec, tab_model = st.tabs(
         [
             "Portfolio Overview",
             "Territory Intelligence",
             "Platform Strategy",
             "Bundle Optimization",
             "Executive Summary",
+            "Model Analytics",
         ]
     )
 
     # -----------------------------------------------------------------
-    # 1. Portfolio Pricing Overview
+    # Model Analytics – BP + PI + SHAP BEFORE graphs
+    # -----------------------------------------------------------------
+    with tab_model:
+        st.subheader("Model Analytics Report")
+
+        run_id = _select_model_run()
+        if not run_id:
+            return
+
+        report = build_model_analytics(run_id)
+        if report.predictions.empty and report.per_model_metrics.empty:
+            st.info(
+                f"No model analytics artifacts found for run_id='{run_id}'. "
+                "Ensure `save_model_artifacts` was called for this run."
+            )
+            return
+
+        # Use model name for display; fall back to run_id if not available
+        model_name = st.session_state.get("reports_model_name_for_selected_run") or run_id
+        st.markdown(f"#### Selected model: `{model_name}`")
+
+        # 1. High-level diagnostics
+        if report.derived_metrics:
+            cols = st.columns(4)
+            cols[0].metric("RMSE", f"{report.derived_metrics.get('rmse', 0):.3f}")
+            cols[1].metric("MAE", f"{report.derived_metrics.get('mae', 0):.3f}")
+            r2 = report.derived_metrics.get("r2")
+            cols[2].metric("R²", f"{r2:.3f}" if r2 is not None else "n/a")
+            mape = report.derived_metrics.get("mape")
+            cols[3].metric("MAPE (%)", f"{mape:.2f}" if mape is not None else "n/a")
+        else:
+            st.info("No predictions.csv found or it is empty; cannot compute RMSE/MAE/R²/MAPE.")
+
+        # 2. Ensemble metrics as tables (not JSON)
+        st.markdown("### Ensemble metrics")
+        if report.ensemble_avg_metrics or report.ensemble_weighted_metrics or report.stacked_meta:
+            col_avg, col_wgt, col_stack = st.columns(3)
+
+            with col_avg:
+                st.caption("Average ensemble")
+                df_avg = _metrics_dict_to_df(report.ensemble_avg_metrics)
+                if not df_avg.empty:
+                    st.dataframe(df_avg, hide_index=True, use_container_width=True)
+                else:
+                    st.write("No metrics found.")
+
+            with col_wgt:
+                st.caption("Weighted ensemble (1/RMSE)")
+                df_wgt = _metrics_dict_to_df(report.ensemble_weighted_metrics)
+                if not df_wgt.empty:
+                    st.dataframe(df_wgt, hide_index=True, use_container_width=True)
+                else:
+                    st.write("No metrics found.")
+
+            with col_stack:
+                st.caption("Stacked ensemble (hybrid)")
+                stack_metrics = (report.stacked_meta or {}).get("metrics", {})
+                df_stack = _metrics_dict_to_df(stack_metrics)
+                if not df_stack.empty:
+                    st.dataframe(df_stack, hide_index=True, use_container_width=True)
+                else:
+                    st.write("No metrics found.")
+        else:
+            st.info("No ensemble JSON artifacts found for this run.")
+
+        # 3. Per-model metrics table (strip BP JSON column if present)
+        st.markdown("### Per-model metrics")
+
+        bp_from_per_model: Optional[Dict[str, Any]] = None
+        if not report.per_model_metrics.empty:
+            per_model_df = report.per_model_metrics.copy()
+
+            last_col = per_model_df.columns[-1]
+            series = per_model_df[last_col]
+
+            # Try to parse first non-null cell as dict (JSON or Python repr)
+            for cell in series.dropna().tolist():
+                if isinstance(cell, dict):
+                    bp_from_per_model = cell
+                    break
+
+                text = str(cell).strip()
+                if not text:
+                    continue
+                # Try JSON
+                if text.startswith("{") and text.endswith("}"):
+                    try:
+                        bp_from_per_model = json.loads(text)
+                        break
+                    except Exception:  # noqa: BLE001
+                        # Try Python literal dict
+                        try:
+                            parsed = ast.literal_eval(text)
+                            if isinstance(parsed, dict):
+                                bp_from_per_model = parsed
+                                break
+                        except Exception:  # noqa: BLE001
+                            continue
+
+            # If we parsed BP successfully, drop the last column from the view
+            if isinstance(bp_from_per_model, dict):
+                per_model_df = per_model_df.drop(columns=[last_col])
+
+            st.dataframe(per_model_df, use_container_width=True)
+        else:
+            st.info("No per_model_metrics.csv found for this run.")
+
+        # 4. BP + Permutation Importance + SHAP (before graphs)
+        model_results = _get_model_results_from_session()
+        if not model_results and bp_from_per_model is None:
+            st.info(
+                "No detailed model results found in session_state['last_model']. "
+                "Train a model in the pipeline Analytical Tools step to populate SHAP/BP."
+            )
+        else:
+            # BP table (prefer per_model JSON; fallback to last_model)
+            st.markdown("### Breusch–Pagan test (heteroscedasticity)")
+            bp = (
+                    bp_from_per_model
+                    or (model_results.get("bp_results") if model_results else None)
+                    or (model_results.get("bp") if model_results else None)
+            )
+            if isinstance(bp, dict) and bp:
+                bp_df = pd.DataFrame(
+                    {"Statistic": list(bp.keys()), "Value": list(bp.values())}
+                )
+                st.dataframe(bp_df, hide_index=True, use_container_width=True)
+            else:
+                st.info("Breusch–Pagan results not available for this run.")
+
+            # Permutation importance
+            st.markdown("### Permutation importance (validation set)")
+            model = model_results.get("model") if model_results else None
+            X_valid = model_results.get("X_valid") if model_results else None
+            y_valid = model_results.get("y_valid") if model_results else None
+            pi_df = None
+            if model is not None and X_valid is not None and y_valid is not None:
+                try:
+                    pi_df = permutation_importance_scores(model, X_valid, y_valid, n_repeats=5)
+                except Exception as ex:  # noqa: BLE001
+                    st.warning(f"Unable to compute permutation importance: {ex}")
+            if pi_df is not None and not pi_df.empty:
+                st.dataframe(pi_df.head(25), use_container_width=True)
+            else:
+                st.info("Permutation importance not available.")
+
+            # SHAP summary
+            st.markdown("### SHAP summary (mean |SHAP|)")
+            X_sample = model_results.get("X_sample") if model_results else None
+            shap_df = None
+            if model is not None and X_sample is not None:
+                try:
+                    shap_df = shap_summary_df(model, X_sample)
+                except Exception as ex:  # noqa: BLE001
+                    st.warning(f"Unable to compute SHAP summary: {ex}")
+            if shap_df is not None and not shap_df.empty:
+                st.dataframe(shap_df.head(25), use_container_width=True)
+            else:
+                st.info("SHAP summary not available.")
+
+        # 5. Prediction diagnostics & charts (after BP/PI/SHAP)
+        st.markdown("### Prediction diagnostics and residual charts")
+
+        # 5a. Tabular + line chart
+        if not report.predictions.empty and {"y_true", "y_pred"}.issubset(
+                report.predictions.columns
+        ):
+            pred_df = report.predictions.copy().dropna(subset=["y_true", "y_pred"])
+            if not pred_df.empty:
+                st.dataframe(pred_df.head(200), use_container_width=True)
+                chart_df = pred_df[["y_true", "y_pred"]]
+                st.line_chart(chart_df)
+            else:
+                st.info("predictions.csv exists but has no valid y_true / y_pred rows.")
+        else:
+            st.info("No predictions.csv found or it does not contain y_true/y_pred.")
+
+        # 5b. Residual diagnostics charts from visual_tools_service
+        if not report.predictions.empty and {"y_true", "y_pred"}.issubset(
+                report.predictions.columns
+        ):
+            y_true = pd.to_numeric(report.predictions["y_true"], errors="coerce")
+            y_pred = pd.to_numeric(report.predictions["y_pred"], errors="coerce")
+            mask = y_true.notna() & y_pred.notna()
+            y_true = y_true[mask]
+            y_pred = y_pred[mask]
+
+            if not y_true.empty:
+                st.markdown("#### Residual diagnostics")
+
+                uri1 = chart_actual_vs_pred(y_true, y_pred)
+                uri2 = chart_residuals(y_true, y_pred)
+                uri3 = chart_residuals_qq(y_true, y_pred)
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.caption("Actual vs Predicted")
+                    st.image(uri1, use_column_width=True)
+                with col2:
+                    st.caption("Residuals vs Predicted")
+                    st.image(uri2, use_column_width=True)
+
+                # Q–Q plot sized the same as the other residual charts
+                col3, col4 = st.columns(2)
+                with col3:
+                    st.caption("Residuals Q–Q plot")
+                    st.image(uri3, use_column_width=True)
+                # col4 intentionally left empty to maintain grid alignment
+                with col4:
+                    st.write("")
+
+        # 6. PDF export
+        st.markdown("---")
+        st.markdown("#### Export Model Analytics report (PDF)")
+
+        if st.button("Generate Model Analytics PDF", key="btn_model_analytics_pdf"):
+            try:
+                ref = generate_model_analytics_report_pdf(
+                    run_id,
+                    report,
+                    model_results=model_results if model_results else None,
+                    model_name=model_name,
+                )
+                st.success(f"Model Analytics report generated: {ref}")
+                _download_button_for_report(ref, "Download Model Analytics report (PDF)")
+            except Exception as ex:  # noqa: BLE001
+                st.error(f"Unable to generate Model Analytics PDF: {ex}")
+
+    # -----------------------------------------------------------------
+    # Portfolio Pricing Overview
     # -----------------------------------------------------------------
     with tab_portfolio:
         st.subheader("Portfolio Pricing Overview")
@@ -231,7 +560,6 @@ def render_reports() -> None:
         if not overview.by_title.empty:
             st.dataframe(overview.by_title, use_container_width=True)
 
-            # Per-tab download
             portfolio_titles_csv = overview.by_title.to_csv(index=False).encode("utf-8")
             st.download_button(
                 label="⬇️ Download portfolio by title (CSV)",
@@ -246,23 +574,8 @@ def render_reports() -> None:
                 "Make sure your Compare predictions include `title_id` or `title_name`."
             )
 
-        # Will be implemented once genre is integrated into the pipeline
-        # st.markdown("### Genre-Level Value (if available)")
-        # if overview.by_genre is not None and not overview.by_genre.empty:
-        #     st.dataframe(overview.by_genre, use_container_width=True)
-        #     genre_csv = overview.by_genre.to_csv(index=False).encode("utf-8")
-        #     st.download_button(
-        #         label="⬇️ Download portfolio by genre (CSV)",
-        #         data=genre_csv,
-        #         file_name="portfolio_by_genre.csv",
-        #         mime="text/csv",
-        #         key="download_portfolio_by_genre_csv",
-        #     )
-        # else:
-        #     st.info("No `genre`/`genres` column detected; genre-level summary not available.")
-
     # -----------------------------------------------------------------
-    # 2. Territory Intelligence
+    # Territory Intelligence
     # -----------------------------------------------------------------
     with tab_territory:
         st.subheader("Territory Intelligence Report")
@@ -291,7 +604,7 @@ def render_reports() -> None:
                 st.bar_chart(chart_df)
 
     # -----------------------------------------------------------------
-    # 3. Platform Strategy
+    # Platform Strategy
     # -----------------------------------------------------------------
     with tab_platform:
         st.subheader("Platform Strategy Report")
@@ -320,7 +633,7 @@ def render_reports() -> None:
                 st.bar_chart(chart_df)
 
     # -----------------------------------------------------------------
-    # 4. Bundle Value Optimization
+    # Bundle Value Optimization
     # -----------------------------------------------------------------
     with tab_bundle:
         st.subheader("Bundle Value Optimization Report")
@@ -362,7 +675,7 @@ def render_reports() -> None:
                 )
 
     # -----------------------------------------------------------------
-    # 5. Executive Pricing Intelligence Summary
+    # Executive Pricing Intelligence Summary
     # -----------------------------------------------------------------
     with tab_exec:
         st.subheader("Executive Pricing Intelligence Summary")

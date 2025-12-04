@@ -6,7 +6,7 @@ import os
 import pandas as pd
 import streamlit as st
 
-from src.services.pipeliine.source_data.feature.feature_builder_service import label_staged_raw_files
+from src.services.pipeline.source_data.feature.feature_builder_service import label_staged_raw_files
 from src.ui.common import get_run_id_from_session_state
 from src.utils.data_io_utils import save_raw, list_raw_files, save_from_url
 from src.utils.log_utils import streamlit_safe, get_logger
@@ -62,6 +62,7 @@ def render():
                 for raw_path in files:
                     # raw_path may be a local path or an S3 URI; use basename for the label
                     raw_str = str(raw_path)
+                    LOGGER.info(f"Processing raw file [{raw_str}]")
                     label = os.path.basename(raw_str)
                     if label not in st.session_state["staged_raw"]:
                         _add_staged(label, raw_str)
