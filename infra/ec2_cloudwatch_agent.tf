@@ -5,7 +5,7 @@ resource "aws_ssm_document" "install_cloudwatch_agent" {
 
   content = jsonencode({
     schemaVersion = "2.2"
-    description   = "Install and configure CloudWatch Agent on PPE EC2"
+    description   = "Configure CloudWatch Agent on PLI app EC2"
     mainSteps = [
       {
         action = "aws:runShellScript"
@@ -14,13 +14,14 @@ resource "aws_ssm_document" "install_cloudwatch_agent" {
           runCommand = [
             # Turn on strict + verbose bash
             "set -euxo pipefail",
+
             # Log everything we do to a debug log
             "exec > >(tee -a /var/log/cwagent_setup.log) 2>&1",
 
-            "echo '--- Starting CloudWatch Agent install & config ---'",
+            "echo '--- Starting CloudWatch Agent config ---'",
 
             # Install the CloudWatch agent (dnf for AL2023, fallback to yum)
-            "dnf -y install amazon-cloudwatch-agent || yum -y install amazon-cloudwatch-agent",
+            # "dnf -y install amazon-cloudwatch-agent || yum -y install amazon-cloudwatch-agent",
 
             "echo 'Creating config directory...'",
             "mkdir -p /opt/aws/amazon-cloudwatch-agent/etc",
@@ -52,8 +53,8 @@ resource "aws_ssm_association" "install_cloudwatch_agent_to_instance" {
   name = aws_ssm_document.install_cloudwatch_agent.name
 
   targets {
-    key = "InstanceIds"
-    values = [aws_instance.ppe_ec2.id]
+    key    = "InstanceIds"
+    values = [aws_instance.pli_ec2.id]
   }
 }
 

@@ -1,15 +1,14 @@
 [Unit]
-Description=PPE App
+Description=PLI App
 After=network.target
 
 [Service]
 User=ec2-user
-WorkingDirectory=/opt/ppe-app
-Environment=PYTHONUNBUFFERED=1
-Environment=ENV_FILE=/opt/ppe-app/aws.env
-ExecStart=/opt/ppe-venv/bin/python3.11 -m streamlit run src/app.py --server.port 8501 --server.address 0.0.0.0
-StandardOutput=append:/var/log/ppe-app/ppe-app.log
-StandardError=append:/var/log/ppe-app/ppe-app.log
+WorkingDirectory=/opt/app
+Environment=ENV_FILE=/opt/app/aws.env
+ExecStart=/opt/app-venv/bin/python3.11 -m streamlit run src/app.py --server.port 8501 --server.address 0.0.0.0
+StandardOutput=append:/var/log/app/app.log
+StandardError=append:/var/log/app/app.log
 Restart=always
 
 [Install]

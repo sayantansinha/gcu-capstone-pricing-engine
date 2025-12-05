@@ -2,7 +2,7 @@
 resource "aws_iam_openid_connect_provider" "github" {
   url             = "https://token.actions.githubusercontent.com"
   client_id_list  = ["sts.amazonaws.com"]
-  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"] # GitHub's
+  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
 }
 
 # Role that GitHub Actions will assume to deploy
@@ -22,8 +22,8 @@ resource "aws_iam_role" "gha_deployer" {
           StringLike = {
             # limit to your repo and default branches/tags
             "token.actions.githubusercontent.com:sub" = [
-              "repo:sayantansinha/gcu-dsc580-pricing-engine-dp:ref:refs/heads/aws_deploy",
-              "repo:sayantansinha/gcu-dsc580-pricing-engine-dp:ref:refs/tags/*"
+              "repo:sayantansinha/gcu-capstone-pricing-engine:ref:refs/heads/aws_deploy",
+              "repo:sayantansinha/gcu-capstone-pricing-engine:ref:refs/tags/*"
             ]
           }
         }
@@ -35,7 +35,7 @@ resource "aws_iam_role" "gha_deployer" {
 
 # Policy for uploading artifact to S3 and triggering CodeDeploy
 resource "aws_iam_policy" "gha_deploy_policy" {
-  name = "${local.app_prefix}-gha-deploy"
+  name = "${local.app_prefix}-gha-deploy-policy"
   policy = jsonencode({
     Version = "2012-10-17",
     Statement = [

@@ -1,36 +1,59 @@
+#############################################
+# identity
+#############################################
+data "aws_caller_identity" "current" {}
+
+#############################################
+# local constants
+#############################################
 locals {
   # AWS region
   aws_region = "us-west-2"
 
   # Project naming prefix
-  app_prefix = "ppe"
+  app_prefix = "pli"
 
   # AMI
-  ppe_ami = "ami-00dd21db9cf92ef84"
-
-  # # Domain
-  # root_domain = "mipuba.com"
-  # ppe_domain = "ppe.${local.root_domain}"
+  app_ami = "ami-0dfb7a6fc556aa4f9"
 
   # Buckets (Free-Tier eligible)
-  raw_bucket             = "${local.app_prefix}-poc-raw"
-  processed_bucket       = "${local.app_prefix}-poc-processed"
-  profiles_bucket        = "${local.app_prefix}-poc-profiles"
-  models_bucket          = "${local.app_prefix}-poc-models"
-  figures_bucket         = "${local.app_prefix}-poc-figures"
-  reports_bucket         = "${local.app_prefix}-poc-reports"
-  deploy_artifact_bucket = "${local.app_prefix}-poc-deploy-artifacts"
+  raw_bucket             = "cap-${local.app_prefix}-raw"
+  processed_bucket       = "cap-${local.app_prefix}-processed"
+  profiles_bucket        = "cap-${local.app_prefix}-profiles"
+  models_bucket          = "cap-${local.app_prefix}-models"
+  figures_bucket         = "cap-${local.app_prefix}-figures"
+  reports_bucket         = "cap-${local.app_prefix}-reports"
+  security_bucket        = "cap-${local.app_prefix}-security"
+  predictions_bucket     = "cap-${local.app_prefix}-preds"
+  deploy_artifact_bucket = "cap-${local.app_prefix}-deploy-artifacts"
+
+  buckets_all = [
+    local.raw_bucket,
+    local.processed_bucket,
+    local.profiles_bucket,
+    local.models_bucket,
+    local.figures_bucket,
+    local.reports_bucket,
+    local.security_bucket,
+    local.predictions_bucket,
+    local.deploy_artifact_bucket
+  ]
+
+  tags = {
+    Project = local.app_prefix
+    Owner   = data.aws_caller_identity.current.account_id
+  }
 
   # CloudWatch agent configuration (metrics + logs)
   cwagent_config = {
     metrics = {
       metrics_collected = {
         mem = {
-          measurement = ["mem_used_percent"]
+          measurement                 = ["mem_used_percent"]
           metrics_collection_interval = 60
         }
         swap = {
-          measurement = ["swap_used_percent"]
+          measurement                 = ["swap_used_percent"]
           metrics_collection_interval = 60
         }
       }
@@ -44,8 +67,8 @@ locals {
         files = {
           collect_list = [
             {
-              file_path       = "/var/log/ppe-app/ppe-app.log"
-              log_group_name  = aws_cloudwatch_log_group.ppe-app-lg.name
+              file_path       = "/var/log/app/app.log"
+              log_group_name  = aws_cloudwatch_log_group.pli-app-lg.name
               log_stream_name = "{instance_id}"
               timezone        = "LOCAL"
             }

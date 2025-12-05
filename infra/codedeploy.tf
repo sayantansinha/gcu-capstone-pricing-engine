@@ -1,12 +1,12 @@
 # App & Deployment Group
-resource "aws_codedeploy_app" "ppe" {
+resource "aws_codedeploy_app" "pli" {
   name             = local.app_prefix
   compute_platform = "Server"
   tags             = local.tags
 }
 
 # Service role for CodeDeploy (managed policy)
-resource "aws_iam_role" "codedeploy_service" {
+resource "aws_iam_role" "pli_codedeploy_service" {
   name = "${local.app_prefix}-codedeploy-svc"
   assume_role_policy = jsonencode({
     Version = "2012-10-17",
@@ -21,15 +21,15 @@ resource "aws_iam_role" "codedeploy_service" {
   tags = local.tags
 }
 
-resource "aws_iam_role_policy_attachment" "codedeploy_managed" {
-  role       = aws_iam_role.codedeploy_service.name
+resource "aws_iam_role_policy_attachment" "pli_codedeploy_managed" {
+  role       = aws_iam_role.pli_codedeploy_service.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSCodeDeployRole"
 }
 
-resource "aws_codedeploy_deployment_group" "ppe_blue" {
-  app_name              = aws_codedeploy_app.ppe.name
-  deployment_group_name = "${local.app_prefix}-blue"
-  service_role_arn      = aws_iam_role.codedeploy_service.arn
+resource "aws_codedeploy_deployment_group" "pli_deploy_grp" {
+  app_name              = aws_codedeploy_app.pli.name
+  deployment_group_name = "${local.app_prefix}-deploy-grp"
+  service_role_arn      = aws_iam_role.pli_codedeploy_service.arn
 
   # target EC2 instances by tags
   ec2_tag_set {
@@ -42,7 +42,7 @@ resource "aws_codedeploy_deployment_group" "ppe_blue" {
     ec2_tag_filter {
       key   = "CodeDeploy:Group"
       type  = "KEY_AND_VALUE"
-      value = "${local.app_prefix}-blue"
+      value = "${local.app_prefix}-deploy-grp"
     }
   }
 

@@ -1,65 +1,65 @@
-#name: Deploy to EC2 via CodeDeploy
-#
-#on:
-#  push:
-#    paths:
-#      - 'src/**'
-#      - 'deploy_scripts/**'
-#      - 'infra/ec2.tf'
-#      - '.github/workflows/deploy.yml'
-#    branches: [ "aws_deploy" ]
-#  pull_request:
-#    paths:
-#      - 'src/**'
-#      - 'deploy_scripts/**'
-#      - 'infra/ec2.tf'
-#      - '.github/workflows/deploy.yml'
-#    branches: [ "aws_deploy" ]
-#  workflow_dispatch: { }
-#
-#permissions:
-#  id-token: write
-#  contents: read
-#
-#env:
-#  AWS_REGION: us-west-2
-#  APP_NAME: ppe
-#  DEPLOY_GROUP: ppe-blue
-#  ARTIFACT_BUCKET: ppe-poc-deploy-artifacts
-#  ARTIFACT_KEY: releases/ppe-${{ github.sha }}.zip
-#
-#jobs:
-#  deploy:
-#    runs-on: ubuntu-latest
-#    steps:
-#      - name: Checkout
-#        uses: actions/checkout@v4
-#
-#      - name: Zip bundle
-#        run: |
-#          zip -r app.zip . -x ".git/*"
-#          mkdir -p out && mv app.zip out/
-#
-#      - name: Configure AWS creds via OIDC
-#        uses: aws-actions/configure-aws-credentials@v4
-#        with:
-#          role-to-assume: arn:aws:iam::236453359468:role/ppe-gha-deployer
-#          aws-region: ${{ env.AWS_REGION }}
-#
-#      - name: Upload artifact to S3
-#        run: aws s3 cp out/app.zip s3://${{ env.ARTIFACT_BUCKET }}/${{ env.ARTIFACT_KEY }}
-#
-#      - name: Create CodeDeploy deployment
-#        id: deploy
-#        run: |
-#          DEPLOY_ID=$(aws deploy create-deployment \
-#            --application-name "${{ env.APP_NAME }}" \
-#            --deployment-group-name "${{ env.DEPLOY_GROUP }}" \
-#            --s3-location bucket="${{ env.ARTIFACT_BUCKET }}",key="${{ env.ARTIFACT_KEY }}",bundleType=zip \
-#            --output text --query deploymentId)
-#          echo "deployment_id=$DEPLOY_ID" >> $GITHUB_OUTPUT
-#
-#      - name: Wait for deployment
-#        run: |
-#          aws deploy wait deployment-successful --deployment-id "${{ steps.deploy.outputs.deployment_id }}"
-#          aws deploy get-deployment --deployment-id "${{ steps.deploy.outputs.deployment_id }}"
+name: Deploy to EC2 via CodeDeploy
+
+on:
+  push:
+    paths:
+      - 'src/**'
+      - 'deploy_scripts/**'
+      - 'infra/ec2.tf'
+      - '.github/workflows/deploy.yml'
+    branches: [ "aws_deploy" ]
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'deploy_scripts/**'
+      - 'infra/ec2.tf'
+      - '.github/workflows/deploy.yml'
+    branches: [ "aws_deploy" ]
+  workflow_dispatch: { }
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-west-2
+  APP_NAME: pli
+  DEPLOY_GROUP: pli-deploy-grp
+  ARTIFACT_BUCKET: cap-pli-deploy-artifacts
+  ARTIFACT_KEY: releases/pli-${{ github.sha }}.zip
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Zip bundle
+        run: |
+          zip -r app.zip . -x ".git/*"
+          mkdir -p out && mv app.zip out/
+
+      - name: Configure AWS creds via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::236453359468:role/pli-gha-deployer
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Upload artifact to S3
+        run: aws s3 cp out/app.zip s3://${{ env.ARTIFACT_BUCKET }}/${{ env.ARTIFACT_KEY }}
+
+      - name: Create CodeDeploy deployment
+        id: deploy
+        run: |
+          DEPLOY_ID=$(aws deploy create-deployment \
+            --application-name "${{ env.APP_NAME }}" \
+            --deployment-group-name "${{ env.DEPLOY_GROUP }}" \
+            --s3-location bucket="${{ env.ARTIFACT_BUCKET }}",key="${{ env.ARTIFACT_KEY }}",bundleType=zip \
+            --output text --query deploymentId)
+          echo "deployment_id=$DEPLOY_ID" >> $GITHUB_OUTPUT
+
+      - name: Wait for deployment
+        run: |
+          aws deploy wait deployment-successful --deployment-id "${{ steps.deploy.outputs.deployment_id }}"
+          aws deploy get-deployment --deployment-id "${{ steps.deploy.outputs.deployment_id }}"
