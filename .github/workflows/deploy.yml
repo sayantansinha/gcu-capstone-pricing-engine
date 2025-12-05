@@ -7,14 +7,14 @@ on:
       - 'deploy_scripts/**'
       - 'infra/ec2.tf'
       - '.github/workflows/deploy.yml'
-    branches: [ "aws_deploy" ]
+    branches: [ "main" ]
   pull_request:
     paths:
       - 'src/**'
       - 'deploy_scripts/**'
       - 'infra/ec2.tf'
       - '.github/workflows/deploy.yml'
-    branches: [ "aws_deploy" ]
+    branches: [ "main" ]
   workflow_dispatch: { }
 
 permissions:
