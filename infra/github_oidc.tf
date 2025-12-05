@@ -22,7 +22,7 @@ resource "aws_iam_role" "gha_deployer" {
           StringLike = {
             # limit to your repo and default branches/tags
             "token.actions.githubusercontent.com:sub" = [
-              "repo:sayantansinha/gcu-capstone-pricing-engine:ref:refs/heads/aws_deploy",
+              "repo:sayantansinha/gcu-capstone-pricing-engine:ref:refs/heads/main",
               "repo:sayantansinha/gcu-capstone-pricing-engine:ref:refs/tags/*"
             ]
           }
