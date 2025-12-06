@@ -85,7 +85,7 @@ def _list_run_ids() -> List[str]:
         if SETTINGS.PROCESSED_BUCKET:
             for key in list_bucket_objects(SETTINGS.PROCESSED_BUCKET, prefix=""):
                 parts = key.split("/")
-                if len(parts) >= 2:
+                if len(parts) >= 2 and parts[0] != "predict_inputs":
                     run_ids.add(parts[0])
         # MODELS
         models_bucket = getattr(SETTINGS, "MODELS_BUCKET", None)
@@ -104,7 +104,7 @@ def _list_run_ids() -> List[str]:
             if not root or not root.exists():
                 continue
             for run_dir in root.iterdir():
-                if run_dir.is_dir():
+                if run_dir.is_dir() and run_dir.name != "predict_inputs":
                     run_ids.add(run_dir.name)
 
     # Sort newest first assuming run_ids start with timestamp
