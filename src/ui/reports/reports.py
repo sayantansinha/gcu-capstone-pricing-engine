@@ -1,5 +1,3 @@
-# src/ui/reports/reports.py
-
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
@@ -21,7 +19,11 @@ from src.services.reports.reports_service import (
     build_model_analytics,
     generate_model_analytics_report_pdf,
 )
-from src.utils.model_io_utils import load_model_registry, load_model_json, load_stacked_model_for_run
+from src.utils.model_io_utils import (
+    load_model_registry,
+    load_model_json,
+    load_stacked_model_for_run,
+)
 from src.utils.data_io_utils import load_report_for_download
 from src.utils.explain_utils import permutation_importance_scores, shap_summary_df
 from src.services.pipeline.analytics.visual_tools_service import (
@@ -282,12 +284,7 @@ def _load_explain_from_artifacts(run_id: str) -> Dict[str, Any]:
     Load explain_params.json for a run and normalize it into
     X_valid, y_valid, X_sample if present.
 
-    This assumes your explain_params.json has keys like:
-      - "X_valid"
-      - "y_valid"
-      - "X_sample"
-
-    If your JSON uses different keys, adjust the mapping accordingly.
+    Accepts a few common key variants so it is robust to how the JSON was written.
     """
     try:
         params = load_model_json(run_id, "explain_params.json") or {}
@@ -297,9 +294,20 @@ def _load_explain_from_artifacts(run_id: str) -> Dict[str, Any]:
     if not isinstance(params, dict):
         return {}
 
-    X_valid = _coerce_explain_df(params.get("X_valid"))
-    y_valid = _coerce_explain_array(params.get("y_valid"))
-    X_sample = _coerce_explain_df(params.get("X_sample"))
+    # Be forgiving about key names / casing
+    def _pick(params_dict: Dict[str, Any], *candidates: str):
+        for name in candidates:
+            if name in params_dict:
+                return params_dict[name]
+        return None
+
+    X_valid_raw = _pick(params, "X_valid", "x_valid", "X_val", "x_val")
+    y_valid_raw = _pick(params, "y_valid", "yVal", "y_val", "Y_valid")
+    X_sample_raw = _pick(params, "X_sample", "x_sample", "X_smpl", "x_smpl")
+
+    X_valid = _coerce_explain_df(X_valid_raw)
+    y_valid = _coerce_explain_array(y_valid_raw)
+    X_sample = _coerce_explain_df(X_sample_raw)
 
     return {
         "X_valid": X_valid,
@@ -321,7 +329,7 @@ def _get_model_results(run_id: str, report) -> Dict[str, Any]:
       - Load X_valid, y_valid, X_sample from explain_params.json.
       - Load the stacked model <model_name>.joblib using report.stacked_meta['model_name'].
     """
-    base = _get_model_results_from_session()  # existing behaviour
+    base = _get_model_results_from_session() or {}
 
     # Resolve the saved model filename from report.stacked_meta, if available
     stacked_meta = getattr(report, "stacked_meta", None) or {}
@@ -419,13 +427,13 @@ def render_reports() -> None:
             key="download_all_reports_zip",
         )
 
-        st.markdown("---")
     else:
         st.info(
             "Pricing reports (Portfolio, Territory, Platform, Executive) "
             "will be available after you run predictions in the Compare tab."
         )
-        st.markdown("---")
+
+    st.markdown("---")
 
     tab_model, tab_portfolio, tab_territory, tab_platform, tab_bundle, tab_exec = st.tabs(
         [
@@ -570,7 +578,7 @@ def render_reports() -> None:
                 st.info("Breusch–Pagan results not available for this run.")
 
             # Permutation importance
-            st.markdown("### Permutation importance (validation set)")
+            st.markdown("### Permutation Importance (Validation Set)")
             model = model_results.get("model") if model_results else None
             X_valid = model_results.get("X_valid") if model_results else None
             y_valid = model_results.get("y_valid") if model_results else None
@@ -583,10 +591,10 @@ def render_reports() -> None:
             if pi_df is not None and not pi_df.empty:
                 st.dataframe(pi_df.head(25), use_container_width=True)
             else:
-                st.info("Permutation importance not available.")
+                st.info("Permutation Importance metrics not available.")
 
             # SHAP summary
-            st.markdown("### SHAP summary (mean |SHAP|)")
+            st.markdown("### SHAP summary (Mean |SHAP|)")
             X_sample = model_results.get("X_sample") if model_results else None
             shap_df = None
             if model is not None and X_sample is not None:
