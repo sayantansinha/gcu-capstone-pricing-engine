@@ -598,7 +598,7 @@ def render():
         st.json(wgt["metrics"])
 
         # ----------------------------
-        # Choose model + X_valid + X_sample for explainability
+        # model + X_valid + X_sample for explainability
         # ----------------------------
         x_valid = base_train_out.get("x_valid")
         model_for_explain = None
@@ -644,6 +644,9 @@ def render():
             y_pred=y_pred,
             pred_src=pred_src,
             model_name=model_name,
+            x_valid=x_valid,
+            y_valid=y_valid,
+            x_sample=x_sample,
         )
         st.session_state["model_trained"] = True
 

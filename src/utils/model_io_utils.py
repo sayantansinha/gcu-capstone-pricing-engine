@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 
 import joblib
+import numpy as np
 import pandas as pd
 from botocore.exceptions import ClientError
 
@@ -256,6 +257,9 @@ def _save_model_artifacts_to_store(
         y_pred,
         pred_src: str,
         model_name: str,
+        x_valid: pd.DataFrame | None = None,
+        y_valid: np.ndarray | None = None,
+        x_sample: pd.DataFrame | None = None,
 ) -> str:
     """
     Backend-agnostic logic for saving all model artifacts for a run.
@@ -322,6 +326,16 @@ def _save_model_artifacts_to_store(
                     ex,
                 )
 
+    # --- explainability parameters ---
+    explain_params = {}
+    if x_valid is not None:
+        explain_params["X_valid"] = x_valid
+    if y_valid is not None:
+        explain_params["y_valid"] = y_valid
+    if x_sample is not None:
+        explain_params["X_sample"] = x_sample
+    store.save_json("explain_params.json", explain_params)
+
     LOGGER.info(
         "Saved model artifacts (%s) → %s",
         "S3" if is_s3() else "LOCAL",
@@ -344,6 +358,9 @@ def save_model_artifacts(
         y_pred,
         pred_src: str,
         model_name: str,
+        x_valid: pd.DataFrame | None = None,
+        y_valid: np.ndarray | None = None,
+        x_sample: pd.DataFrame | None = None,
 ) -> str:
     """
     Persist model artifacts for a run, abstracting over LOCAL vs S3.
@@ -377,6 +394,9 @@ def save_model_artifacts(
         y_pred=y_pred,
         pred_src=pred_src,
         model_name=model_name,
+        x_valid=x_valid,
+        y_valid=y_valid,
+        x_sample=x_sample,
     )
     return out_path
 

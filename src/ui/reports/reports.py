@@ -223,6 +223,124 @@ def _metrics_dict_to_df(metrics: Dict[str, Any]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _coerce_explain_df(obj: Any) -> Optional[pd.DataFrame]:
+    """
+    Try to turn whatever is stored in explain_params.json into a DataFrame.
+
+    Supports a few common JSON shapes:
+      - {"columns": [...], "data": [[...], ...]}
+      - list[dict]  (records)
+      - dict of column -> list
+    """
+    if obj is None:
+        return None
+
+    try:
+        if isinstance(obj, dict):
+            cols = obj.get("columns")
+            data = obj.get("data")
+            if cols is not None and data is not None:
+                return pd.DataFrame(data, columns=cols)
+            # fall back: try treating dict as column -> list
+            return pd.DataFrame(obj)
+
+        if isinstance(obj, list):
+            if not obj:
+                return pd.DataFrame()
+            if isinstance(obj[0], dict):
+                return pd.DataFrame(obj)
+            return pd.DataFrame(obj)
+    except Exception:
+        return None
+
+    return None
+
+
+def _coerce_explain_array(obj: Any):
+    """
+    Try to turn whatever is stored for y_valid into a 1D array-like.
+    """
+    if obj is None:
+        return None
+    try:
+        import numpy as np  # local import
+
+        if isinstance(obj, (list, tuple)):
+            return np.array(obj)
+        if isinstance(obj, dict):
+            # If stored as {"values": [...]} or similar, try values()
+            if "values" in obj and isinstance(obj["values"], (list, tuple)):
+                return np.array(obj["values"])
+            return np.array(list(obj.values()))
+        return np.asarray(obj)
+    except Exception:
+        return None
+
+
+def _load_explain_from_artifacts(run_id: str) -> Dict[str, Any]:
+    """
+    Load explain_params.json for a run and normalize it into
+    X_valid, y_valid, X_sample if present.
+
+    This assumes your explain_params.json has keys like:
+      - "X_valid"
+      - "y_valid"
+      - "X_sample"
+
+    If your JSON uses different keys, adjust the mapping accordingly.
+    """
+    try:
+        params = load_model_json(run_id, "explain_params.json") or {}
+    except Exception:
+        params = {}
+
+    if not isinstance(params, dict):
+        return {}
+
+    X_valid = _coerce_explain_df(params.get("X_valid"))
+    y_valid = _coerce_explain_array(params.get("y_valid"))
+    X_sample = _coerce_explain_df(params.get("X_sample"))
+
+    return {
+        "X_valid": X_valid,
+        "y_valid": y_valid,
+        "X_sample": X_sample,
+    }
+
+
+def _get_model_results(run_id: str) -> Dict[str, Any]:
+    """
+    Combine session-based last_model with persisted explain_params.json
+    for the selected run.
+
+    Logic:
+      - Start with st.session_state['last_model'] (via _get_model_results_from_session)
+      - If X_valid, y_valid, X_sample are ALL present in session, return as-is
+      - Otherwise, load explain_params.json ONCE for this run and use it only
+        to fill the missing pieces.
+    """
+    base = _get_model_results_from_session()
+
+    # If session already has everything we need, don't hit disk/S3
+    have_all_from_session = all(
+        base.get(key) is not None for key in ("X_valid", "y_valid", "X_sample")
+    )
+    if have_all_from_session:
+        return base
+
+    # Only now do we load from artifacts
+    explain = _load_explain_from_artifacts(run_id)
+
+    for key in ("X_valid", "y_valid", "X_sample"):
+        if base.get(key) is None and explain.get(key) is not None:
+            base[key] = explain[key]
+
+    if explain:
+        base.setdefault("explain_params", {}).update(explain)
+
+    return base
+
+
 # ---------------------------------------------------------------------
 # Main entrypoint
 # ---------------------------------------------------------------------
@@ -417,7 +535,7 @@ def render_reports() -> None:
             st.info("No per_model_metrics.csv found for this run.")
 
         # BP + Permutation Importance + SHAP (before graphs)
-        model_results = _get_model_results_from_session()
+        model_results = _get_model_results(run_id)
         if not model_results and bp_from_per_model is None:
             st.info(
                 "No detailed model results found in session_state['last_model']. "
