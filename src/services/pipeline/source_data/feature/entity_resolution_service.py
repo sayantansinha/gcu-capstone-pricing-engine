@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 
 from src.config.config_loader import load_config_from_file
-from src.utils.data_io_utils import save_processed
+from src.utils.data_io_utils import save_processed, fetch_entity_res_config_file_path
 from src.utils.ent_res_utils import id_entity_map, resolve_entities
 from src.utils.log_utils import get_logger
 
@@ -23,7 +23,7 @@ def create_entity_mapping(
 ) -> tuple[pd.DataFrame, str]:
     LOGGER.info("Starting entity mapping...")
     # tuning from config
-    er_config = load_config_from_file(str(Path(__file__).parent.parent.parent.parent.parent / "config/er_config.toml"))
+    er_config = load_config_from_file(fetch_entity_res_config_file_path())
     contingency_year = er_config["entity_resolution"]["contingency_year"]
     min_similarity_score = er_config["entity_resolution"]["min_similarity_score"]
     country_iso2_code_map = er_config["entity_resolution"]["iso3_to_iso2_map"]

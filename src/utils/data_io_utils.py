@@ -59,6 +59,12 @@ def _ensure_buckets():
         ensure_bucket(b)
 
 
+def fetch_entity_res_config_file_path() -> str:
+    er_config_file_path = str(Path(__file__).parent.parent / "config/er_config.toml")
+    LOGGER.info(f"entity res config file path: {er_config_file_path}")
+    return er_config_file_path
+
+
 # -----------------------------
 # Raw data
 # -----------------------------
