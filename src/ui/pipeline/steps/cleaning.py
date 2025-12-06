@@ -1,9 +1,8 @@
 import pandas as pd
 import streamlit as st
 from matplotlib import pyplot as plt
-from sklearn.preprocessing import StandardScaler, RobustScaler
 
-from src.services.pipeline.source_data.preprocessing.cleaning_service import impute
+from src.services.pipeline.source_data.preprocessing.cleaning_service import impute, scale
 from src.ui.common import end_tab_scroll, begin_tab_scroll, section_panel, load_active_feature_master_from_session
 from src.utils.data_io_utils import save_processed, save_profile
 from src.utils.log_utils import get_logger
