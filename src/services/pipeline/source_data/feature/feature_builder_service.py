@@ -9,12 +9,12 @@ import streamlit as st
 
 from src.config.env_loader import SETTINGS
 from src.config.config_loader import load_config_from_file
+from src.services.pipeline.source_data.feature.entity_resolution_service import create_entity_mapping
 from src.utils.imdb_utils import load_imdb_core, load_imdb_akas, imdb_candidate_universe
 from src.utils.title_utils import normalize_title
 from src.utils.data_io_utils import save_processed, load_raw, fetch_entity_res_config_file_path
 from src.utils.log_utils import get_logger
 from src.utils.feature_utils import preferred_column_order, validate_columns_exist_in_dataframe
-from src.services.pipeline.source_data.preprocessing.entity_resolution_service import create_entity_mapping
 
 LOGGER = get_logger("feature_builder_service")
 FEATURE_MASTER_FILENAME = "feature_master_" + datetime.now().strftime("%Y%m%d_%H%M")
