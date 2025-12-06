@@ -19,6 +19,7 @@ from src.services.reports.reports_service import (
     build_model_analytics,
     generate_model_analytics_report_pdf,
 )
+from src.utils.log_utils import get_logger
 from src.utils.model_io_utils import (
     load_model_registry,
     load_model_json,
@@ -31,6 +32,8 @@ from src.services.pipeline.analytics.visual_tools_service import (
     chart_residuals,
     chart_residuals_qq,
 )
+
+LOGGER = get_logger("ui_reports")
 
 
 # ---------------------------------------------------------------------
@@ -346,6 +349,7 @@ def _get_model_results(run_id: str, report) -> Dict[str, Any]:
         base.get(key) is not None for key in ("X_valid", "y_valid", "X_sample")
     )
     if have_all_from_session:
+        LOGGER.info(f"Model Results from session: {base}")
         return base
 
     # 3) Fill in any missing explain inputs from explain_params.json
@@ -357,6 +361,8 @@ def _get_model_results(run_id: str, report) -> Dict[str, Any]:
 
     if explain:
         base.setdefault("explain_params", {}).update(explain)
+
+    LOGGER.info(f"Model Results from saved artifacts: {base}")
 
     return base
 
