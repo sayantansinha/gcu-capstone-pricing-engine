@@ -57,8 +57,12 @@ def _log_step(step_name: str, payload: dict):
     st.session_state.steps.append({step_name: payload})
 
 
+def _copy_df_for_preprocessing() -> pd.DataFrame:
+    return st.session_state.cleaned_df.copy() if st.session_state.cleaned_df is not None else st.session_state.df.copy()
+
+
 def _tab_impute():
-    df = st.session_state.df.copy()
+    df = _copy_df_for_preprocessing()
     num_cols = df.select_dtypes(include="number").columns.tolist()
 
     with st.form("impute_form"):
@@ -141,7 +145,7 @@ def _tab_impute():
 
 
 def _tab_outliers():
-    df = st.session_state.cleaned_df.copy()
+    df = _copy_df_for_preprocessing()
     num_cols = df.select_dtypes(include="number").columns.tolist()
     st.subheader("Outlier Handling")
 
@@ -167,7 +171,7 @@ def _tab_outliers():
 
             if method == "IQR Filter":
                 before_n = len(df)
-                df_work = df[(df[c] >= lo) & (df[c] <= hi)]
+                df = df[(df[c] >= lo) & (df[c] <= hi)]
                 counts[c] = {"removed": int(before_n - len(df))}
             else:
                 # Winsorize (clip)
@@ -201,7 +205,7 @@ def _tab_outliers():
 
 
 def _tab_encoding():
-    df = st.session_state.cleaned_df.copy()
+    df = _copy_df_for_preprocessing()
     st.subheader("Categorical Encoding")
     cat_cols = df.select_dtypes(exclude="number").columns.tolist()
     cols_sel = st.multiselect("Categorical columns", cat_cols, default=cat_cols)
@@ -269,58 +273,70 @@ def _tab_encoding():
         st.success("Encoding applied.")
 
 
-def _tab_scaling():
-    df = st.session_state.cleaned_df.copy()
+def _tab_scaling() -> None:
+    df = _copy_df_for_preprocessing()
     st.subheader("Scaling")
+
+    # Detect numeric columns from the working dataframe
     num_cols = df.select_dtypes(include="number").columns.tolist()
-    cols_sel = st.multiselect("Numeric columns to scale", num_cols)
-    scaler_name = st.selectbox("Scaler", ["StandardScaler", "RobustScaler"])
-    if st.button("Apply scaling"):
+    if not num_cols:
+        st.info("No numeric columns available to scale.")
+        return
+
+    cols_sel = st.multiselect("Numeric columns to scale", num_cols, default=num_cols)
+
+    scaler_name = st.selectbox(
+        "Scaler",
+        ["StandardScaler", "MinMaxScaler"],
+        help="StandardScaler: mean=0, std=1. MinMaxScaler: rescale to [0, 1].",
+    )
+
+    if st.button("Apply scaling", type="primary"):
         cols = cols_sel or num_cols
+
+        # Before-scaling summary
         before = _num_summary(df, cols)
 
-        X = st.session_state.df[cols].values
-        scaler = StandardScaler() if scaler_name == "StandardScaler" else RobustScaler()
-        Xs = scaler.fit_transform(X)
-        for i, c in enumerate(cols):
-            st.session_state.df[c] = Xs[:, i]
+        # Map UI choice → service method
+        method = "standard" if scaler_name == "StandardScaler" else "minmax"
 
-        after = _num_summary(df, cols)
+        # Scale based on method
+        df_scaled = scale(df, columns=cols, method=method)
+
+        # After-scaling summary, recomputed from the scaled frame
+        after = _num_summary(df_scaled, cols)
 
         with st.container(border=True):
-            st.markdown("Post-scaling summary")
+            st.markdown("#### Before vs After Scaling (numeric summary)")
             comp = before.merge(after, on="column", suffixes=("_before", "_after"))
             st.dataframe(comp.round(6), use_container_width=True)
-            st.caption(
-                "Expectation: mean≈0 and std≈1 for StandardScaler; reduced influence of outliers for RobustScaler.")
 
-            # Quick visual: pre vs post scatter for one column
-            if cols:
-                c0 = cols[0]
-                fig, ax = plt.subplots()
-                ax.scatter(df.index, df[c0])
-                ax.set_title(f"Scaled values: {c0}")
-                st.pyplot(fig, clear_figure=True)
+        # Persist the cleaned/updated frame for downstream steps
+        st.session_state.cleaned_df = df_scaled
 
-        st.session_state.cleaned_df = df
+        # Log step for manifest
+        _log_step(
+            "scaling",
+            {
+                "scaler": scaler_name,
+                "method": method,
+                "columns": cols,
+                "summary_post": after.round(6).to_dict(orient="records"),
+            },
+        )
 
-        _log_step("scaling", {
-            "scaler": scaler_name,
-            "columns": cols,
-            "summary_post": after.round(6).to_dict(orient="records"),
-        })
-        st.success("Scaling applied.")
+        st.success(f"Scaling applied using {scaler_name} to {len(cols)} column(s).")
 
 
 def _tab_dedup():
     st.subheader("Deduplication")
     key = st.selectbox("Primary unique key", ["license_id", "title_id"])
     tie_break = st.selectbox("Retain rule", ["Most complete", "Latest window_end"])
+    work = _copy_df_for_preprocessing()
 
     if st.button("Apply deduplication"):
-        before_n = len(st.session_state.cleaned_df)
+        before_n = len(work)
 
-        work = st.session_state.cleaned_df.copy()
         # mark duplicates by key
         dup_mask = work.duplicated(subset=[key], keep=False)
         dups = work[dup_mask]
