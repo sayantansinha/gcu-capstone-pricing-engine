@@ -6,6 +6,7 @@ from typing import Dict, Any, Optional, List
 
 import joblib
 import pandas as pd
+from botocore.exceptions import ClientError
 
 from src.config.env_loader import SETTINGS
 from src.utils.data_io_utils import _ensure_buckets, is_s3
@@ -171,12 +172,24 @@ class _S3ModelStore(_BaseModelStore):
         try:
             # load_bucket_object for CSV is expected to return a DataFrame
             return load_bucket_object(self.bucket, key)
-        except FileNotFoundError:
-            LOGGER.info(f"load_model_csv(S3) missing: s3://{self.bucket}/{key}")
-            return None
+        except ClientError as e:
+            err_code = (e.response.get("Error") or {}).get("Code")
+            if err_code in ("NoSuchKey", "NoSuchBucket"):
+                LOGGER.info("load_model_csv(S3) missing: s3://%s/%s", self.bucket, key)
+                return None
+            LOGGER.exception(
+                "Error loading model CSV s3://%s/%s (code=%s): %s",
+                self.bucket,
+                key,
+                err_code,
+                e,
+            )
+            raise e
         except Exception as ex:
-            LOGGER.exception(f"Error loading model CSV s3://{self.bucket}/{key}: {ex}")
-            raise
+            LOGGER.exception(
+                "Error loading model CSV s3://%s/%s: %s", self.bucket, key, ex
+            )
+            raise ex
 
     def load_json(self, filename: str) -> Optional[dict]:
         if not self.bucket:
@@ -185,12 +198,24 @@ class _S3ModelStore(_BaseModelStore):
         key = f"{self.prefix}{filename}"
         try:
             return load_bucket_object(self.bucket, key)
-        except FileNotFoundError:
-            LOGGER.info(f"load_model_json(S3) missing: s3://{self.bucket}/{key}")
-            return None
+        except ClientError as e:
+            err_code = (e.response.get("Error") or {}).get("Code")
+            if err_code in ("NoSuchKey", "NoSuchBucket"):
+                LOGGER.info("load_model_json(S3) missing: s3://%s/%s", self.bucket, key)
+                return None
+            LOGGER.exception(
+                "Error loading model JSON s3://%s/%s (code=%s): %s",
+                self.bucket,
+                key,
+                err_code,
+                e,
+            )
+            raise e
         except Exception as ex:
-            LOGGER.exception(f"Error loading model JSON s3://{self.bucket}/{key}: {ex}")
-            raise
+            LOGGER.exception(
+                "Error loading model JSON s3://%s/%s: %s", self.bucket, key, ex
+            )
+            raise ex
 
     def run_exists(self) -> bool:
         if not self.bucket:
@@ -427,13 +452,25 @@ def load_model_registry() -> list[dict]:
         if not bucket:
             LOGGER.warning("MODELS_BUCKET not configured; load_model_registry → []")
             return []
+
         try:
             data = load_bucket_object(bucket, key)
             # We expect the registry to be a list[dict]
             return data if isinstance(data, list) else []
-        except FileNotFoundError:
-            LOGGER.info("Model registry not found in S3; returning empty list")
-            return []
+        except ClientError as e:
+            # Handle missing key/bucket as "registry not found"
+            err_code = (e.response.get("Error") or {}).get("Code")
+            if err_code in ("NoSuchKey", "NoSuchBucket"):
+                LOGGER.info(
+                    "Model registry not found in S3 (%s/%s, code=%s); returning empty list",
+                    bucket,
+                    key,
+                    err_code,
+                )
+                return []
+            # Anything else is a real error
+            LOGGER.exception("Error loading model registry from S3: %s", e)
+            raise e
         except Exception as ex:
             LOGGER.exception(f"Error loading model registry from S3: {ex}")
             raise
