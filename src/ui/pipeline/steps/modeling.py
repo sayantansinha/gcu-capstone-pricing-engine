@@ -600,7 +600,7 @@ def render():
         # ----------------------------
         # model + X_valid + X_sample for explainability
         # ----------------------------
-        x_valid = base_train_out.get("x_valid")
+        x_valid = base_train_out.get("X_valid")
         model_for_explain = None
         x_sample = None
 
