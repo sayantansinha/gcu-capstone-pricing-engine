@@ -23,7 +23,7 @@ def create_entity_mapping(
 ) -> tuple[pd.DataFrame, str]:
     LOGGER.info("Starting entity mapping...")
     # tuning from config
-    er_config = load_config_from_file(str(Path(__file__).parent.parent.parent.parent / "config/er_config.toml"))
+    er_config = load_config_from_file(str(Path(__file__).parent.parent.parent.parent.parent / "config/er_config.toml"))
     contingency_year = er_config["entity_resolution"]["contingency_year"]
     min_similarity_score = er_config["entity_resolution"]["min_similarity_score"]
     country_iso2_code_map = er_config["entity_resolution"]["iso3_to_iso2_map"]
