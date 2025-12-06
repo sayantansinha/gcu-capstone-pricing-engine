@@ -21,7 +21,7 @@ from src.services.reports.reports_service import (
     build_model_analytics,
     generate_model_analytics_report_pdf,
 )
-from src.utils.model_io_utils import load_model_registry
+from src.utils.model_io_utils import load_model_registry, load_model_json, load_stacked_model_for_run
 from src.utils.data_io_utils import load_report_for_download
 from src.utils.explain_utils import permutation_importance_scores, shap_summary_df
 from src.services.pipeline.analytics.visual_tools_service import (
@@ -308,27 +308,39 @@ def _load_explain_from_artifacts(run_id: str) -> Dict[str, Any]:
     }
 
 
-def _get_model_results(run_id: str) -> Dict[str, Any]:
+def _get_model_results(run_id: str, report) -> Dict[str, Any]:
     """
-    Combine session-based last_model with persisted explain_params.json
-    for the selected run.
+    Combine session-based last_model with persisted artifacts for the selected run.
 
-    Logic:
-      - Start with st.session_state['last_model'] (via _get_model_results_from_session)
-      - If X_valid, y_valid, X_sample are ALL present in session, return as-is
-      - Otherwise, load explain_params.json ONCE for this run and use it only
-        to fill the missing pieces.
+    Leverages build_model_analytics(report) as the single source of truth for
+    the saved model filename via report.stacked_meta['model_name'].
+
+    Priority:
+      - Use st.session_state['last_model'] when available.
+      - Only hit disk/S3 when something is missing (model or explain inputs).
+      - Load X_valid, y_valid, X_sample from explain_params.json.
+      - Load the stacked model <model_name>.joblib using report.stacked_meta['model_name'].
     """
-    base = _get_model_results_from_session()
+    base = _get_model_results_from_session()  # existing behaviour
 
-    # If session already has everything we need, don't hit disk/S3
+    # Resolve the saved model filename from report.stacked_meta, if available
+    stacked_meta = getattr(report, "stacked_meta", None) or {}
+    saved_model_name = stacked_meta.get("model_name")  # e.g. "stacked_pricing_model"
+
+    # 1) Ensure we have a model: prefer session, otherwise load from artifacts
+    if base.get("model") is None and saved_model_name:
+        model = load_stacked_model_for_run(run_id, saved_model_name)
+        if model is not None:
+            base["model"] = model
+
+    # 2) If X_valid, y_valid, X_sample are ALL present in session, don't hit JSON
     have_all_from_session = all(
         base.get(key) is not None for key in ("X_valid", "y_valid", "X_sample")
     )
     if have_all_from_session:
         return base
 
-    # Only now do we load from artifacts
+    # 3) Fill in any missing explain inputs from explain_params.json
     explain = _load_explain_from_artifacts(run_id)
 
     for key in ("X_valid", "y_valid", "X_sample"):
@@ -535,7 +547,7 @@ def render_reports() -> None:
             st.info("No per_model_metrics.csv found for this run.")
 
         # BP + Permutation Importance + SHAP (before graphs)
-        model_results = _get_model_results(run_id)
+        model_results = _get_model_results(run_id, report)
         if not model_results and bp_from_per_model is None:
             st.info(
                 "No detailed model results found in session_state['last_model']. "

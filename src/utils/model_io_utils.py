@@ -450,6 +450,79 @@ def load_model_json(run_id: str, filename: str) -> Optional[dict]:
     return store.load_json(filename)
 
 
+def load_stacked_model_for_run(run_id: str, model_name: str):
+    """
+    Load the stacked model <model_name>.joblib for a given run_id.
+
+    Matches the save path used in _save_model_artifacts_to_store:
+        store.save_joblib(f"{model_name}.joblib", stacked["model"])
+
+    So the layout is:
+        LOCAL: <MODELS_DIR>/<run_id>/<model_name>.joblib
+        S3:    s3://<MODELS_BUCKET>/<run_id>/<model_name>.joblib
+    """
+    if not model_name:
+        return None
+
+    run_id = (run_id or "").strip("/")
+    filename = f"{model_name}.joblib"
+
+    # ----------------------------
+    # S3 BACKEND
+    # ----------------------------
+    if is_s3():
+        bucket = getattr(SETTINGS, "MODELS_BUCKET", None)
+        if not bucket:
+            LOGGER.warning("MODELS_BUCKET not defined; cannot load stacked model.")
+            return None
+
+        key = f"{run_id}/{filename}"
+
+        try:
+            obj = load_bucket_object(bucket, key)
+        except Exception as ex:
+            LOGGER.info("Stacked model not found in S3: s3://%s/%s (%s)", bucket, key, ex)
+            return None
+
+        # load_bucket_object may return raw bytes, Body.read(), or dict
+        if isinstance(obj, (bytes, bytearray)):
+            data = obj
+        elif hasattr(obj, "read"):
+            data = obj.read()
+        elif isinstance(obj, dict) and "Body" in obj:
+            data = obj["Body"].read()
+        else:
+            # Fallback: attempt to treat obj as bytes
+            try:
+                data = bytes(obj)
+            except Exception:
+                LOGGER.error("Unsupported S3 object format for stacked model: %s", type(obj))
+                return None
+
+        buf = io.BytesIO(data)
+        try:
+            return joblib.load(buf)
+        except Exception as ex:
+            LOGGER.exception("Failed to load stacked model joblib from S3 key %s: %s", key, ex)
+            return None
+
+    # ----------------------------
+    # LOCAL BACKEND
+    # ----------------------------
+    models_root = Path(getattr(SETTINGS, "MODELS_DIR", "models"))
+    path = models_root / run_id / filename
+
+    if not path.exists():
+        LOGGER.info("No stacked model found locally at %s", path)
+        return None
+
+    try:
+        return joblib.load(path)
+    except Exception as ex:
+        LOGGER.exception("Failed to load stacked model at %s: %s", path, ex)
+        return None
+
+
 # -------------------------------------------------------------------------
 # Model registry (global index of trained hybrid models)
 # -------------------------------------------------------------------------
