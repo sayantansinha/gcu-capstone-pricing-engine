@@ -64,3 +64,6 @@ This below table provides contextual guidance for using each pipeline expander p
 
 
 _**Note**: The app is designed to run locally for now, with plans to deploy on a cloud platform like AWS in future.
+
+### Limitations and Future Work
+While the Pricing & Licensing Insights application provides a robust and modular framework for licensing price estimation, several limitations remain that offer opportunities for future enhancement. The current implementation relies on a streamlined dataset and controlled modeling assumptions, which may limit generalizability when applied to larger, heterogeneous licensing catalogs. Additionally, the pricing model is trained using a single algorithmic approach, and expanding this to include model comparison, hyperparameter tuning, or ensemble strategies could improve predictive accuracy. System monitoring is functional but could be extended with automated drift detection, retraining triggers, and enhanced test coverage. Finally, while the user interface supports all major workflows, additional usability improvements, such as, scenario-based wizards, guided tooltips, or role-specific dashboards, could enhance accessibility for non-technical stakeholders.
