@@ -54,6 +54,19 @@ def _load_raw_from_identifier(identifier: str, base_dir: str | None = None) -> p
     return load_raw(identifier)
 
 
+def _normalize_for_load_raw(identifier: str) -> str:
+    """
+    Normalise staged raw identifiers for use with data_io_utils.load_raw,
+    which expects an S3 key (e.g. 'run_id/file.parquet') rather than a
+    full s3:// URI when IO_BACKEND == 'S3'.
+    """
+    if SETTINGS.IO_BACKEND == "S3" and isinstance(identifier, str) and identifier.startswith("s3://"):
+        parsed = urlparse(identifier)
+        # e.g. s3://bucket/run_id/file.parquet -> "run_id/file.parquet"
+        return parsed.path.lstrip("/")
+    return identifier
+
+
 def _load_df_from_cache(raw_path: str) -> pd.DataFrame:
     LOGGER.info(f"Loading raw data from {raw_path}")
     cache_key = f"_raw_preview::{raw_path}"
@@ -124,15 +137,20 @@ def build_features(
     base["title_norm"] = normalize_title(base["title"])
     LOGGER.info("Synthetic base file: title normalized")
 
+    # NEW: normalize IMDb identifiers
+    imdb_basics_file_id = _normalize_for_load_raw(imdb_basics_filename)
+    imdb_ratings_file_id = _normalize_for_load_raw(imdb_ratings_filename)
+    imdb_akas_file_id = _normalize_for_load_raw(imdb_akas_filename)
+
     # IMDb candidates
-    core = load_imdb_core(imdb_basics_filename, imdb_ratings_filename)
+    core = load_imdb_core(imdb_basics_file_id, imdb_ratings_file_id)
     validate_columns_exist_in_dataframe(
         core,
         required=["title_id", "primaryTitle", "releaseYear", "primary_title_norm"],
         name="IMDB core"
     )
 
-    akas = load_imdb_akas(imdb_akas_filename)
+    akas = load_imdb_akas(imdb_akas_file_id)
     validate_columns_exist_in_dataframe(
         akas,
         required=["title_id", "aka_title_norm", "region", "language"],
