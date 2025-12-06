@@ -146,12 +146,27 @@ def train_base_models(
         model_names: List[str],
         params_map: Dict[str, Dict[str, Any]] | None = None,
 ) -> Dict[str, Any]:
+    """
+    Train and evaluate multiple models on a consistent train/validation split.
+
+    Returns:
+        {
+            "features": [str],              # feature names
+            "X_valid": pd.DataFrame,        # NEW: validation feature matrix (for explainability)
+            "y_valid": np.ndarray,          # validation target
+            "valid_preds": {name: np.ndarray},
+            "per_model_metrics": [ {...}, ... ],
+            "models": {name: fitted_model},
+        }
+    """
     Xtr, Xva, ytr, yva, feat_names = _split(df, target)
     params_map = params_map or {}
     per_model_metrics: List[Dict[str, Any]] = []
     valid_preds: Dict[str, np.ndarray] = {}
     fitted: Dict[str, Any] = {}
 
+    # Keep validation features as a DataFrame so downstream code (explainability, BP test, etc.)
+    # has easy access to column names.
     Xva_df = pd.DataFrame(Xva, columns=feat_names)
 
     for name in model_names:
@@ -169,8 +184,36 @@ def train_base_models(
 
     return {
         "features": feat_names,
+        "X_valid": Xva_df,  # NEW: used by explainability + reports
         "y_valid": yva,
-        "valid_preds": valid_preds,  # dict name -> np.ndarray
+        "valid_preds": valid_preds,
         "per_model_metrics": per_model_metrics,
-        "models": fitted
+        "models": fitted,
+    }
+
+
+# ---------------------------------------------------------------------
+# Ensembles (computed automatically; no UI selection)
+# ---------------------------------------------------------------------
+def combine_average(base_out: Dict[str, Any]) -> Dict[str, Any]:
+    yv = base_out["y_valid"]
+    M = np.column_stack(list(base_out["valid_preds"].values()))
+    pred = M.mean(axis=1)
+    return {"kind": "average", "pred": pred, "metrics": _metrics(yv, pred)}
+
+
+def combine_weighted_inverse_rmse(base_out: Dict[str, Any]) -> Dict[str, Any]:
+    yv = base_out["y_valid"]
+    metrics = {r["model"]: r for r in base_out["per_model_metrics"]}
+    names = list(base_out["valid_preds"].keys())
+    M = np.column_stack([base_out["valid_preds"][n] for n in names])
+    rmses = np.array([metrics[n]["RMSE"] for n in names])
+    inv = 1.0 / (rmses + 1e-8)
+    w = inv / inv.sum()
+    pred = (M * w).sum(axis=1)
+    return {
+        "kind": "weighted_inverse_rmse",
+        "pred": pred,
+        "weights": {n: float(w[i]) for i, n in enumerate(names)},
+        "metrics": _metrics(yv, pred)
     }
