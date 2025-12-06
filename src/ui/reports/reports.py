@@ -319,7 +319,7 @@ def _load_explain_from_artifacts(run_id: str) -> Dict[str, Any]:
     }
 
 
-def _get_model_results(run_id: str, report) -> Dict[str, Any]:
+def _get_model_results(run_id: str, model_name: str) -> Dict[str, Any]:
     """
     Combine session-based last_model with persisted artifacts for the selected run.
 
@@ -334,13 +334,9 @@ def _get_model_results(run_id: str, report) -> Dict[str, Any]:
     """
     base = _get_model_results_from_session() or {}
 
-    # Resolve the saved model filename from report.stacked_meta, if available
-    stacked_meta = getattr(report, "stacked_meta", None) or {}
-    saved_model_name = stacked_meta.get("model_name")  # e.g. "stacked_pricing_model"
-
     # 1) Ensure we have a model: prefer session, otherwise load from artifacts
-    if base.get("model") is None and saved_model_name:
-        model = load_stacked_model_for_run(run_id, saved_model_name)
+    if base.get("model") is None and model_name:
+        model = load_stacked_model_for_run(run_id, model_name)
         if model is not None:
             base["model"] = model
 
@@ -561,7 +557,7 @@ def render_reports() -> None:
             st.info("No per_model_metrics.csv found for this run.")
 
         # BP + Permutation Importance + SHAP (before graphs)
-        model_results = _get_model_results(run_id, report)
+        model_results = _get_model_results(run_id, model_name)
         if not model_results and bp_from_per_model is None:
             st.info(
                 "No detailed model results found in session_state['last_model']. "
