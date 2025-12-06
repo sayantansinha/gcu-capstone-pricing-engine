@@ -295,7 +295,7 @@ def _save_model_artifacts_to_store(
     if stacked and isinstance(stacked, dict) and "model" in stacked:
         try:
             store.save_joblib(f"{model_name}.joblib", stacked["model"])
-        except Exception as ex:
+        except Exception as ex:  # noqa: BLE001
             LOGGER.warning(
                 "Could not save stacked ensemble model for run %s to %s: %s",
                 run_id,
@@ -317,7 +317,7 @@ def _save_model_artifacts_to_store(
         for name, est in models.items():
             try:
                 store.save_joblib(f"{name}.joblib", est)
-            except Exception as ex:
+            except Exception as ex:  # noqa: BLE001
                 LOGGER.warning(
                     "Could not save base estimator '%s' for run %s to %s: %s",
                     name,
@@ -327,14 +327,28 @@ def _save_model_artifacts_to_store(
                 )
 
     # --- explainability parameters ---
-    explain_params = {}
+    explain_params: Dict[str, Any] = {}
+
     if x_valid is not None:
-        explain_params["X_valid"] = x_valid
+        explain_params["X_valid"] = {
+            "columns": list(x_valid.columns),
+            "data": x_valid.to_numpy().tolist(),
+        }
+
     if y_valid is not None:
-        explain_params["y_valid"] = y_valid
+        # ensure plain Python list
+        y_arr = np.asarray(y_valid).ravel().tolist()
+        explain_params["y_valid"] = y_arr
+
     if x_sample is not None:
-        explain_params["X_sample"] = x_sample
-    store.save_json("explain_params.json", explain_params)
+        explain_params["X_sample"] = {
+            "columns": list(x_sample.columns),
+            "data": x_sample.to_numpy().tolist(),
+        }
+
+    # Only write the file if we have something to save
+    if explain_params:
+        store.save_json("explain_params.json", explain_params)
 
     LOGGER.info(
         "Saved model artifacts (%s) → %s",
