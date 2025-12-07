@@ -338,6 +338,7 @@ def _get_model_results(run_id: str, model_name: str) -> Dict[str, Any]:
     if base.get("model") is None and model_name:
         model = load_stacked_model_for_run(run_id, model_name)
         if model is not None:
+            LOGGER.info(f"Model loaded joblib: {model}")
             base["model"] = model
 
     # 2) If X_valid, y_valid, X_sample are ALL present in session, don't hit JSON
@@ -559,8 +560,9 @@ def render_reports() -> None:
         # BP + Permutation Importance + SHAP (before graphs)
         model_results = _get_model_results(run_id, model_name)
         if not model_results and bp_from_per_model is None:
+            LOGGER.warning("No model results found for this run.")
             st.info(
-                "No detailed model results found in session_state['last_model']. "
+                "No detailed model results found. "
                 "Train a model in the pipeline Analytical Tools step to populate SHAP/BP."
             )
         else:
@@ -586,8 +588,10 @@ def render_reports() -> None:
             y_valid = model_results.get("y_valid") if model_results else None
             pi_df = None
             if model is not None and X_valid is not None and y_valid is not None:
+                LOGGER.info("Calculating Permutation Importance scores")
                 try:
                     pi_df = permutation_importance_scores(model, X_valid, y_valid, n_repeats=5)
+                    LOGGER.info(f"Calculatied Permutation Importance score DF : {pi_df.shape}")
                 except Exception as ex:  # noqa: BLE001
                     st.warning(f"Unable to compute permutation importance: {ex}")
             if pi_df is not None and not pi_df.empty:
@@ -598,10 +602,12 @@ def render_reports() -> None:
             # SHAP summary
             st.markdown("### SHAP summary (Mean |SHAP|)")
             X_sample = model_results.get("X_sample") if model_results else None
+            LOGGER.info(f"Calculating SHAP scores with sample X : {X_sample.shape}")
             shap_df = None
             if model is not None and X_sample is not None:
                 try:
                     shap_df = shap_summary_df(model, X_sample)
+                    LOGGER.info(f"Calculated SHAP scores : {shap_df.shape}")
                 except Exception as ex:  # noqa: BLE001
                     st.warning(f"Unable to compute SHAP summary: {ex}")
             if shap_df is not None and not shap_df.empty:

@@ -465,6 +465,8 @@ def load_stacked_model_for_run(run_id: str, model_name: str):
     if not model_name:
         return None
 
+    LOGGER.info(f"Loading stacked model for run_id={run_id}")
+
     run_id = (run_id or "").strip("/")
     filename = f"{model_name}.joblib"
 
@@ -478,7 +480,7 @@ def load_stacked_model_for_run(run_id: str, model_name: str):
             return None
 
         key = f"{run_id}/{filename}"
-
+        LOGGER.info(f"Model S3 Key = {key}")
         try:
             obj = load_bucket_object(bucket, key)
         except Exception as ex:
