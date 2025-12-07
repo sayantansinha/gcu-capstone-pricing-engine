@@ -14,7 +14,7 @@ locals {
   app_prefix = "pli"
 
   # AMI
-  app_ami = "ami-030899d9b6df3345c"
+  app_ami = "ami-0ebda4230423eb2b4"
 
   # Buckets (Free-Tier eligible)
   raw_bucket             = "cap-${local.app_prefix}-raw"
