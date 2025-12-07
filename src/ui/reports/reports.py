@@ -346,7 +346,7 @@ def _get_model_results(run_id: str, model_name: str) -> Dict[str, Any]:
         base.get(key) is not None for key in ("X_valid", "y_valid", "X_sample")
     )
     if have_all_from_session:
-        LOGGER.info(f"Model Results from session: {base}")
+        LOGGER.debug(f"Model Results from session: {base}")
         return base
 
     # 3) Fill in any missing explain inputs from explain_params.json
@@ -359,7 +359,7 @@ def _get_model_results(run_id: str, model_name: str) -> Dict[str, Any]:
     if explain:
         base.setdefault("explain_params", {}).update(explain)
 
-    LOGGER.info(f"Model Results from saved artifacts: {base}")
+    LOGGER.debug(f"Model Results from saved artifacts: {base}")
 
     return base
 
@@ -588,12 +588,14 @@ def render_reports() -> None:
             y_valid = model_results.get("y_valid") if model_results else None
             pi_df = None
             if model is not None and X_valid is not None and y_valid is not None:
-                LOGGER.info("Calculating Permutation Importance scores")
+                LOGGER.debug("Calculating Permutation Importance scores")
                 try:
                     pi_df = permutation_importance_scores(model, X_valid, y_valid, n_repeats=5)
                     LOGGER.info(f"Calculatied Permutation Importance score DF : {pi_df.shape}")
-                except Exception as ex:  # noqa: BLE001
-                    st.warning(f"Unable to compute permutation importance: {ex}")
+                except Exception:
+                    error_txt = "Unable to compute permutation importance"
+                    LOGGER.exception(error_txt)
+                    st.warning(error_txt)
             if pi_df is not None and not pi_df.empty:
                 st.dataframe(pi_df.head(25), use_container_width=True)
             else:

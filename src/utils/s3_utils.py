@@ -177,6 +177,7 @@ def load_bucket_object(bucket: str, key: str) -> Any:
     - *.parquet → pandas.DataFrame
     - *.csv / *.tsv → pandas.DataFrame
     - *.json → dict / list (parsed via json.loads)
+    - all other types → raw bytes (for binary files like joblib)
     """
     k = key.lower()
 
@@ -187,7 +188,17 @@ def load_bucket_object(bucket: str, key: str) -> Any:
 
     # Generic object via GetObject
     params = {"Bucket": bucket, "Key": key, **_owner_dst()}
-    obj = s3.get_object(**params)
+    try:
+        obj = s3.get_object(**params)
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "")
+        # Normalize S3 "not found" into FileNotFoundError
+        if error_code in ("NoSuchKey", "NotFound", "404"):
+            LOGGER.info(f"Object not found: {formulate_s3_uri(bucket, key)}")
+            raise FileNotFoundError(f"s3://{bucket}/{key} not found") from e
+        LOGGER.exception(f"ClientError fetching s3://{bucket}/{key}: {e}")
+        raise
+
     body = obj["Body"].read()
 
     # JSON path
@@ -199,8 +210,12 @@ def load_bucket_object(bucket: str, key: str) -> Any:
             raise
 
     # CSV / TSV path → DataFrame
-    sep = "\t" if k.endswith(".tsv") else ","
-    return pd.read_csv(io.BytesIO(body), sep=sep)
+    if k.endswith(".csv") or k.endswith(".tsv"):
+        sep = "\t" if k.endswith(".tsv") else ","
+        return pd.read_csv(io.BytesIO(body), sep=sep)
+
+    # All other types → return raw bytes (e.g., for joblib / pickle)
+    return body
 
 
 def write_bucket_object(

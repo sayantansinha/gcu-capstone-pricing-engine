@@ -484,7 +484,7 @@ def load_stacked_model_for_run(run_id: str, model_name: str):
         try:
             obj = load_bucket_object(bucket, key)
         except Exception as ex:
-            LOGGER.info("Stacked model not found in S3: s3://%s/%s (%s)", bucket, key, ex)
+            LOGGER.exception(f"Stacked model not found in S3: s3://{bucket}/{key}")
             return None
 
         # load_bucket_object may return raw bytes, Body.read(), or dict
