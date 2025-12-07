@@ -37,6 +37,7 @@ def permutation_importance_scores(
         X_valid: pd.DataFrame,
         y_valid: pd.Series,
         n_repeats: int = 5,
+        scoring: str = "r2",
 ) -> pd.DataFrame:
     """
     Compute permutation importance for a joblib-loaded (already-fitted) model.
@@ -44,9 +45,20 @@ def permutation_importance_scores(
     We wrap the loaded model in _PredictOnlyWrapper so that scikit-learn's
     parameter validation sees an estimator with a `fit` method, but we still
     use the original model's `predict` under the hood.
+
+    Parameters
+    ----------
+    model : fitted model (e.g., joblib-loaded stacked ensemble)
+    X_valid : validation features
+    y_valid : validation target
+    n_repeats : number of permutation repeats
+    scoring : sklearn scoring string, default "r2" for regression
+
+    Returns
+    -------
+    DataFrame with columns ["feature", "importance"], sorted descending.
     """
-    # Always wrap to be robust to custom classes that may not satisfy
-    # sklearn's HasMethods('fit') constraint after serialization.
+    # Wrap to satisfy sklearn's "has fit" requirement; we rely on predict()
     estimator = _PredictOnlyWrapper(model)
 
     r = permutation_importance(
@@ -55,6 +67,7 @@ def permutation_importance_scores(
         y_valid,
         n_repeats=n_repeats,
         random_state=42,
+        scoring=scoring,
     )
 
     return (
@@ -71,34 +84,82 @@ def permutation_importance_scores(
 
 def shap_summary_df(model, X_sample: pd.DataFrame) -> pd.DataFrame:
     """
-    Returns mean |SHAP| per feature for tree models (XGBoost/LightGBM) and
-    generic models via KernelExplainer fallback.
+    Compute SHAP summary values for a joblib-loaded, already-fitted model.
 
-    IMPORTANT:
-    - We use the *original* model here (NOT the wrapper) so that tree models
-      still expose their native boosters to TreeExplainer.
-    - For your stacked/other models, we fall back to KernelExplainer on
-      model.predict, which works fine on joblib-loaded fitted models.
+    Works for:
+      - Tree models (XGBoost / LightGBM) via TreeExplainer
+      - Stacked, linear, MLP, or general models via KernelExplainer
+
+    Avoids:
+      - Infinite runtimes (limits background/eval/nsamples)
+      - sklearn warnings about missing feature names
     """
     try:
-        # Tree-specific fast path: XGBoost / LightGBM
+        if X_sample is None or len(X_sample) == 0:
+            return pd.DataFrame({"feature": [], "mean_abs_shap": []})
+
+        feature_names = list(X_sample.columns)
+
+        # -----------------------------------------------------------
+        # Fast path: tree-based models → TreeExplainer
+        # -----------------------------------------------------------
         if hasattr(model, "get_booster") or model.__class__.__name__.startswith("LGBM"):
-            explainer = shap.TreeExplainer(model)
-            shap_vals = explainer.shap_values(X_sample)
-        else:
-            # Generic / stacked / linear models: KernelExplainer on predict
-            X_background = shap.sample(X_sample, 200, random_state=42)
-            explainer = shap.KernelExplainer(model.predict, X_background)
-            shap_vals = explainer.shap_values(
-                shap.sample(X_sample, 200, random_state=42),
-                nsamples=200,
+            eval_data = X_sample.sample(
+                n=min(200, len(X_sample)), random_state=42
             )
+            explainer = shap.TreeExplainer(model)
+            shap_vals = explainer.shap_values(eval_data)
+
+            sv = np.abs(shap_vals).mean(axis=0)
+            return (
+                pd.DataFrame(
+                    {
+                        "feature": eval_data.columns,
+                        "mean_abs_shap": sv,
+                    }
+                )
+                .sort_values("mean_abs_shap", ascending=False)
+                .reset_index(drop=True)
+            )
+
+        # -----------------------------------------------------------
+        # Generic / Stacked / Linear / MLP → KernelExplainer
+        # -----------------------------------------------------------
+
+        # Limit sample sizes heavily for runtime safety
+        background = X_sample.sample(
+            n=min(50, len(X_sample)), random_state=42
+        )
+        eval_data = X_sample.sample(
+            n=min(100, len(X_sample)), random_state=123
+        )
+
+        def predict_with_feature_names(X):
+            """
+            SHAP often passes numpy arrays; convert them back to DataFrame
+            so sklearn models requiring feature names behave correctly.
+            """
+            if not isinstance(X, pd.DataFrame):
+                X = pd.DataFrame(X, columns=feature_names)
+            else:
+                X = X[feature_names]  # enforce ordering + subset
+            return model.predict(X)
+
+        explainer = shap.KernelExplainer(
+            predict_with_feature_names,
+            background,
+        )
+
+        shap_vals = explainer.shap_values(
+            eval_data,
+            nsamples=100,  # keeps runtime under control
+        )
 
         sv = np.abs(shap_vals).mean(axis=0)
         return (
             pd.DataFrame(
                 {
-                    "feature": X_sample.columns,
+                    "feature": feature_names,
                     "mean_abs_shap": sv,
                 }
             )
@@ -107,7 +168,5 @@ def shap_summary_df(model, X_sample: pd.DataFrame) -> pd.DataFrame:
         )
 
     except Exception:
-        LOGGER.exception("shap_summary_df")
-        # In reports we don't want to hard-fail if SHAP blows up; just
-        # return an empty frame and let the UI show "no SHAP available".
+        # Silent failure to keep reports UI stable
         return pd.DataFrame({"feature": [], "mean_abs_shap": []})
