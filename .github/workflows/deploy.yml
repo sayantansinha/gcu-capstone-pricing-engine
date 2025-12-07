@@ -6,6 +6,7 @@ on:
       - 'src/**'
       - 'deploy_scripts/**'
       - 'infra/ec2.tf'
+      - 'requirements.txt'
       - '.github/workflows/deploy.yml'
     branches: [ "main" ]
   pull_request:
@@ -13,6 +14,7 @@ on:
       - 'src/**'
       - 'deploy_scripts/**'
       - 'infra/ec2.tf'
+      - 'requirements.txt'
       - '.github/workflows/deploy.yml'
     branches: [ "main" ]
   workflow_dispatch: { }
