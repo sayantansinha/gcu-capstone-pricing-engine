@@ -20,9 +20,6 @@ resource "aws_ssm_document" "install_cloudwatch_agent" {
 
             "echo '--- Starting CloudWatch Agent config ---'",
 
-            # Install the CloudWatch agent (dnf for AL2023, fallback to yum)
-            # "dnf -y install amazon-cloudwatch-agent || yum -y install amazon-cloudwatch-agent",
-
             "echo 'Creating config directory...'",
             "mkdir -p /opt/aws/amazon-cloudwatch-agent/etc",
 
