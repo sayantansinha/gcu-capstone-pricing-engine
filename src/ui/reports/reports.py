@@ -338,7 +338,7 @@ def _get_model_results(run_id: str, model_name: str) -> Dict[str, Any]:
     if base.get("model") is None and model_name:
         model = load_stacked_model_for_run(run_id, model_name)
         if model is not None:
-            LOGGER.info(f"Model loaded joblib: {model}")
+            LOGGER.debug(f"Model loaded joblib: {model}")
             base["model"] = model
 
     # 2) If X_valid, y_valid, X_sample are ALL present in session, don't hit JSON
@@ -604,7 +604,7 @@ def render_reports() -> None:
             # SHAP summary
             st.markdown("### SHAP summary (Mean |SHAP|)")
             X_sample = model_results.get("X_sample") if model_results else None
-            LOGGER.info(f"Calculating SHAP scores with sample X : {X_sample.shape}")
+            LOGGER.debug(f"Calculating SHAP scores with sample X : {X_sample.shape}")
             shap_df = None
             if model is not None and X_sample is not None:
                 try:

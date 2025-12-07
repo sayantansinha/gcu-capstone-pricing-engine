@@ -11,7 +11,7 @@ def get_logger(name: str, logging_level: int = logging.INFO) -> logging.Logger:
     if not logger.handlers:
         handler = logging.StreamHandler()
         fmt = logging.Formatter(
-            "[%(asctime)s.%(msecs)03d] %(levelname)s | %(name)s | %(message)s",
+            "[%(asctime)s.%(msecs)03d] %(levelname)s | file=%(name)s | line_no=%(lineno)d | msg=%(message)s",
             datefmt="%d-%b-%Y %H:%M:%S"
         )
         handler.setFormatter(fmt)
