@@ -137,7 +137,7 @@ def build_features(
     base["title_norm"] = normalize_title(base["title"])
     LOGGER.info("Synthetic base file: title normalized")
 
-    # NEW: normalize IMDb identifiers
+    # Normalize IMDb identifiers
     imdb_basics_file_id = _normalize_for_load_raw(imdb_basics_filename)
     imdb_ratings_file_id = _normalize_for_load_raw(imdb_ratings_filename)
     imdb_akas_file_id = _normalize_for_load_raw(imdb_akas_filename)
